@@ -21,6 +21,7 @@ export type Track = {
   duration: string;
   coverStyle: string;
   tone: string;
+  moods: string[];
 };
 
 const poster = {
@@ -39,7 +40,7 @@ export const films: Film[] = [
     rating: '8.6',
     genre: 'Фантастика',
     duration: '2 ч 08 мин',
-    description: 'Таинственное сообщение с заброшенной станции на орбите Луны ставит молодого инженера перед решением, от которого зависит будущее человечества. Дальние миры, тишина космоса и неожиданные повороты — в оригинальной истории TurboMedia.',
+    description: 'Таинственное сообщение с заброшенной станции на орбите Луны ставит молодого инженера перед решением, от которого зависит будущее человечества. Дальние миры, тишина космоса и неожиданные повороты — в оригинальной истории КИНОВОЛНА.',
     poster: poster.orbit,
     badge: 'Новинка',
     kind: 'Фильм',
@@ -123,10 +124,10 @@ export const films: Film[] = [
 ];
 
 export const tracks: Track[] = [
-  { id: 'midnight', title: 'Полночь', artist: 'Sabo', album: 'Огни города', duration: '3:42', coverStyle: 'cover-moon', tone: 'Инди-поп' },
-  { id: 'bluehour', title: 'Синий час', artist: 'Ravon', album: 'Тихая волна', duration: '4:08', coverStyle: 'cover-blue', tone: 'Электроника' },
-  { id: 'distance', title: 'Расстояние', artist: 'Yulduz & Diyor', album: 'Дороги', duration: '3:26', coverStyle: 'cover-dusk', tone: 'Альтернатива' },
-  { id: 'quiet', title: 'В тишине', artist: 'Sabo', album: 'Ты не один', duration: '3:57', coverStyle: 'cover-green', tone: 'Инди-поп' },
+  { id: 'midnight', title: 'Полночь', artist: 'Sabo', album: 'Огни города', duration: '3:42', coverStyle: 'cover-moon', tone: 'Инди-поп', moods: ['love', 'road', 'sad'] },
+  { id: 'bluehour', title: 'Синий час', artist: 'Ravon', album: 'Тихая волна', duration: '4:08', coverStyle: 'cover-blue', tone: 'Электроника', moods: ['work', 'happy'] },
+  { id: 'distance', title: 'Расстояние', artist: 'Yulduz & Diyor', album: 'Дороги', duration: '3:26', coverStyle: 'cover-dusk', tone: 'Альтернатива', moods: ['road', 'love'] },
+  { id: 'quiet', title: 'В тишине', artist: 'Sabo', album: 'Ты не один', duration: '3:57', coverStyle: 'cover-green', tone: 'Инди-поп', moods: ['work', 'sad'] },
 ];
 
 export const generatedArt = {

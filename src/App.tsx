@@ -51,12 +51,20 @@ const playlists = [
   { title: 'Тихая волна', subtitle: 'Для спокойного дня', className: 'playlist-blue', tracks: 12 },
   { title: 'Новый маршрут', subtitle: 'В дорогу', className: 'playlist-road', tracks: 15 },
 ];
+const moodWaves = [
+  { id: 'love', title: 'Для любви', subtitle: 'Нежность и чувства', symbol: '♡', className: 'mood-love' },
+  { id: 'road', title: 'В дороге', subtitle: 'Музыка для пути', symbol: '↗', className: 'mood-road' },
+  { id: 'workout', title: 'Для тренировки', subtitle: 'Ритм и энергия', symbol: '↯', className: 'mood-workout' },
+  { id: 'work', title: 'Для работы', subtitle: 'Фокус и концентрация', symbol: '◎', className: 'mood-focus' },
+  { id: 'happy', title: 'Хорошее настроение', subtitle: 'Лёгкость и свет', symbol: '✦', className: 'mood-fresh' },
+  { id: 'sad', title: 'Грустный вечер', subtitle: 'Тихие чувства', symbol: '…', className: 'mood-sad' },
+];
 
 function Logo() {
   return (
-    <div className="brand-lockup" aria-label="TurboMedia">
-      <span className="brand-mark"><span>t</span><i /></span>
-      <span className="brand-word">turbo<span>media</span></span>
+    <div className="brand-lockup" aria-label="КИНОВОЛНА">
+      <span className="brand-mark"><span>К</span><i /></span>
+      <span className="brand-word">КИНО<span>ВОЛНА</span></span>
     </div>
   );
 }
@@ -149,13 +157,47 @@ function EmptyState({ query, onReset }: { query?: string; onReset: () => void })
   );
 }
 
-function LoadingState() {
+const splashParticles = [
+  { left: '14%', top: '24%', delay: '0ms' },
+  { left: '25%', top: '72%', delay: '260ms' },
+  { left: '37%', top: '18%', delay: '480ms' },
+  { left: '53%', top: '82%', delay: '120ms' },
+  { left: '69%', top: '26%', delay: '380ms' },
+  { left: '82%', top: '67%', delay: '620ms' },
+  { left: '91%', top: '38%', delay: '220ms' },
+  { left: '8%', top: '54%', delay: '540ms' },
+];
+
+function SplashScreen({ onSkip, exiting }: { onSkip: () => void; exiting: boolean }) {
   return (
-    <div className="loading-state" role="status" aria-label="Загрузка">
-      <span className="loading-orb"><AudioLines size={21} /></span>
-      <span>TurboMedia загружается</span>
-      <div className="loading-track"><i /></div>
-    </div>
+    <main className={`cinema-splash ${exiting ? 'splash-exiting' : ''}`} aria-label="КИНОВОЛНА">
+      <div className="splash-atmosphere" aria-hidden="true">
+        <span className="splash-beam splash-beam-one" />
+        <span className="splash-beam splash-beam-two" />
+        <span className="splash-beam splash-beam-three" />
+        <span className="splash-horizon" />
+        {splashParticles.map((particle, index) => (
+          <span key={index} className="splash-particle" style={{ left: particle.left, top: particle.top, animationDelay: particle.delay }} />
+        ))}
+      </div>
+      <div className="splash-content">
+        <svg className="splash-symbol" viewBox="0 0 96 72" fill="none" aria-hidden="true">
+          <path d="M7 43C20 43 20 23 33 23S46 49 59 49 72 30 89 30" />
+          <path d="M7 54C20 54 20 34 33 34S46 60 59 60 72 41 89 41" />
+          <circle cx="59" cy="49" r="3" />
+        </svg>
+        <div className="splash-wordmark" aria-label="КИНОВОЛНА">
+          {Array.from('КИНОВОЛНА').map((letter, index) => (
+            <span key={`${letter}-${index}`} className="splash-letter" style={{ animationDelay: `${index * 70}ms` }}>{letter}</span>
+          ))}
+        </div>
+        <span className="splash-rule" />
+        <p className="splash-tagline">МИР КИНО И МУЗЫКИ</p>
+        <p className="splash-caption">ИСТОРИИ, КОТОРЫЕ ОСТАЮТСЯ С ВАМИ</p>
+      </div>
+      <span className="splash-corner-label">КИНО · МУЗЫКА · СЕРИАЛЫ</span>
+      <button className="splash-skip" onClick={onSkip}>Пропустить <ArrowRight size={14} /></button>
+    </main>
   );
 }
 
@@ -175,22 +217,33 @@ function App() {
   const [musicQuery, setMusicQuery] = useState('');
   const [filter, setFilter] = useState('Всё');
   const [musicMode, setMusicMode] = useState<'all' | 'favorites'>('all');
+  const [selectedMusicMood, setSelectedMusicMood] = useState<string | null>(null);
   const [selectedFilm, setSelectedFilm] = useState<FilmItem | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>(['echoes']);
   const [musicFavorites, setMusicFavorites] = useState<string[]>(['bluehour']);
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>(['neon', 'city']);
+  const [recentTrackIds, setRecentTrackIds] = useState<string[]>([]);
   const [activeTrack, setActiveTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
-  const [isBooting, setIsBooting] = useState(true);
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [isSplashLeaving, setIsSplashLeaving] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setIsBooting(false), 450);
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = window.setTimeout(() => setIsSplashLeaving(true), reducedMotion ? 120 : 1950);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!isSplashLeaving) return;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = window.setTimeout(() => setIsSplashVisible(false), reducedMotion ? 50 : 340);
+    return () => window.clearTimeout(timer);
+  }, [isSplashLeaving]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -228,9 +281,10 @@ function App() {
     return tracks.filter((track) => {
       const matchesQuery = !normalized || [track.title, track.artist, track.album, track.tone].some((value) => value.toLocaleLowerCase().includes(normalized));
       const matchesMode = musicMode === 'all' || musicFavorites.includes(track.id);
-      return matchesQuery && matchesMode;
+      const matchesMood = !selectedMusicMood || track.moods.includes(selectedMusicMood);
+      return matchesQuery && matchesMode && matchesMood;
     });
-  }, [musicFavorites, musicMode, musicQuery]);
+  }, [musicFavorites, musicMode, musicQuery, selectedMusicMood]);
 
   const goTo = (next: Section) => {
     setSection(next);
@@ -265,11 +319,12 @@ function App() {
   };
 
   const chooseTrack = (track: Track) => {
+    setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
     setActiveTrack(track);
     openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist} — пример каталога. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток. Сейчас этот экран не запускает музыку.`, 'Музыка · ждёт подключения');
   };
 
-  if (isBooting) return <main className="boot-shell"><LoadingState /></main>;
+  if (isSplashVisible) return <SplashScreen exiting={isSplashLeaving} onSkip={() => setIsSplashLeaving(true)} />;
 
   const renderFilmGrid = (items: FilmItem[]) => items.length ? (
     <div className="film-grid">
@@ -278,6 +333,14 @@ function App() {
       ))}
     </div>
   ) : <EmptyState query={query} onReset={() => { setQuery(''); setFilter('Всё'); }} />;
+
+  const renderFilmRail = (items: FilmItem[]) => (
+    <div className="film-rail">
+      {items.map((film) => (
+        <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />
+      ))}
+    </div>
+  );
 
   const renderTrackList = (list: Track[]) => list.length ? (
     <div className="track-list">
@@ -295,60 +358,71 @@ function App() {
     </div>
   ) : <EmptyState query={musicQuery || undefined} onReset={() => { setMusicQuery(''); setMusicMode('all'); }} />;
 
-  const renderHome = () => (
-    <>
-      <section className="hero-card" style={{ backgroundImage: `linear-gradient(90deg, rgba(7,12,14,.98) 0%, rgba(7,12,14,.76) 35%, rgba(7,12,14,.12) 100%), linear-gradient(0deg, rgba(7,12,14,.5), transparent 52%), url("${generatedArt.hero}")` }}>
-        <div className="hero-topline"><Tag bright><Sparkles size={12} /> Выбор недели</Tag><span className="hero-index">01 <i /> 04</span></div>
-        <div className="hero-copy">
-          <div className="hero-overline"><span className="overline-dot" /> ОРИГИНАЛ TURBOMEDIA</div>
-          <h1>Будущее<br />уже <em>близко.</em></h1>
-          <p>Один сигнал из глубин космоса способен изменить всё.</p>
-          <div className="hero-details"><span><Star size={14} fill="currentColor" /> 8.6</span><i />2026<i />Фантастика<i />2 ч 08 мин</div>
-          <div className="hero-actions">
-            <button className="button button-primary" onClick={() => openFilm(films[0])}><Play size={16} fill="currentColor" /> Подробнее</button>
-            <button className="button button-glass" onClick={() => toggleFilmFavorite('orbit')}><Plus size={17} /> {favorites.includes('orbit') ? 'Сохранено' : 'В мой список'}</button>
+  const renderHome = () => {
+    const filmsOnly = films.filter((film) => film.kind === 'Фильм');
+    const sortedByRating = [...filmsOnly].sort((a, b) => Number(b.rating) - Number(a.rating));
+    const latestFilms = [...filmsOnly].sort((a, b) => b.year - a.year);
+    const series = films.filter((film) => film.kind === 'Сериал');
+
+    return (
+      <>
+        <section className="hero-card" style={{ backgroundImage: `linear-gradient(90deg, rgba(7,10,18,.98) 0%, rgba(7,10,18,.76) 35%, rgba(7,10,18,.12) 100%), linear-gradient(0deg, rgba(7,10,18,.5), transparent 52%), url("${generatedArt.hero}")` }}>
+          <div className="hero-topline"><Tag bright><Sparkles size={12} /> Выбор недели</Tag><span className="hero-index">01 <i /> 04</span></div>
+          <div className="hero-copy">
+            <div className="hero-overline"><span className="overline-dot" /> КИНОВОЛНА · КАТАЛОГ-ПРИМЕР</div>
+            <h1>Будущее<br />уже <em>близко.</em></h1>
+            <p>Один сигнал из глубин космоса способен изменить всё.</p>
+            <div className="hero-details"><span><Star size={14} fill="currentColor" /> 8.6</span><i />2026<i />Фантастика<i />2 ч 08 мин</div>
+            <div className="hero-actions">
+              <button className="button button-primary" onClick={() => openFilm(films[0])}><Play size={16} fill="currentColor" /> Подробнее</button>
+              <button className="button button-glass" onClick={() => toggleFilmFavorite('orbit')}><Plus size={17} /> {favorites.includes('orbit') ? 'Сохранено' : 'В мой список'}</button>
+            </div>
           </div>
-        </div>
-        <div className="hero-caption"><span className="caption-line" /> Почувствуйте атмосферу кино</div>
-      </section>
+          <div className="hero-caption"><span className="caption-line" /> Почувствуйте атмосферу кино</div>
+        </section>
 
-      <section className="content-section">
-        <SectionHeading eyebrow="Подобрано для вас" title="Что посмотрим сегодня?" action="Смотреть всё" onAction={() => goTo('movies')} />
-        <div className="chip-row home-chips">
-          {['Всё', 'Популярное', 'Новинки'].map((item) => <button key={item} className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)}>{item === 'Популярное' && <Sparkles size={13} />}{item}</button>)}
-        </div>
-        {renderFilmGrid(filter === 'Всё' ? films.slice(0, 4) : filteredFilms.slice(0, 4))}
-      </section>
+        <section className="content-section home-rail-section rail-now">
+          <SectionHeading eyebrow="Демо-подборка" title="Сейчас смотрят" action="Весь каталог" onAction={() => goTo('movies')} />
+          {renderFilmRail(sortedByRating.slice(0, 5))}
+          <p className="home-demo-note">Пока это демонстрационный каталог; реальные просмотры подключим вместе с backend.</p>
+        </section>
 
-      <section className="music-feature">
-        <div className="feature-orb orb-one" /><div className="feature-orb orb-two" />
-        <div className="music-feature-copy"><Tag><AudioLines size={13} /> Аудионастроение</Tag><h2>Огни города</h2><p>Спокойные ритмы для полуночного настроения. Найдите свой саундтрек.</p><button className="button button-glass" onClick={() => goTo('music')}>К музыке <ArrowRight size={15} /></button></div>
-        <div className="feature-sound"><div className="sound-disc"><span /><i /></div><div className="sound-wave">{Array.from({ length: 16 }, (_, index) => <i key={index} />)}</div></div>
-      </section>
+        <section className="content-section home-rail-section rail-popular">
+          <SectionHeading eyebrow="Высокие оценки · пример" title="Популярное" action="Смотреть всё" onAction={() => goTo('movies')} />
+          {renderFilmRail(sortedByRating.slice(0, 4))}
+        </section>
 
-      <section className="content-section compact-section">
-        <SectionHeading eyebrow="Недавно добавлено" title="Продолжение сериалов" action="В каталог" onAction={() => goTo('movies')} />
-        <div className="series-banner" onClick={() => openFilm(films[4])} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') openFilm(films[4]); }}>
-          <div className="series-art" style={{ backgroundImage: `linear-gradient(90deg, rgba(9,13,16,.1), rgba(9,13,16,.05)), url("${films[4].poster}")` }} />
-          <div className="series-details"><Tag bright>Новая серия</Tag><h3>Эхо тишины</h3><p>Сезон 1 · добавлена серия 4</p><span className="series-cta">О сериале <ArrowRight size={15} /></span></div>
-          <span className="series-play"><Play size={18} fill="currentColor" /></span>
-        </div>
-      </section>
-    </>
-  );
+        <section className="content-section home-rail-section rail-new">
+          <SectionHeading eyebrow="Свежие истории" title="Новинки кино" action="В каталог" onAction={() => { goTo('movies'); setFilter('Новинки'); }} />
+          {renderFilmRail(latestFilms.slice(0, 5))}
+        </section>
 
+        <section className="content-section home-rail-section rail-series">
+          <SectionHeading eyebrow="Истории, к которым возвращаются" title="Сериалы" action="Все сериалы" onAction={() => goTo('movies')} />
+          {renderFilmRail(series)}
+        </section>
+
+        <section className="music-feature">
+          <div className="feature-orb orb-one" /><div className="feature-orb orb-two" />
+          <div className="music-feature-copy"><Tag><AudioLines size={13} /> Аудионастроение</Tag><h2>Огни города</h2><p>Спокойные ритмы для полуночного настроения. Найдите свой саундтрек.</p><button className="button button-glass" onClick={() => goTo('music')}>К музыке <ArrowRight size={15} /></button></div>
+          <div className="feature-sound"><div className="sound-disc"><span /><i /></div><div className="sound-wave">{Array.from({ length: 16 }, (_, index) => <i key={index} />)}</div></div>
+        </section>
+      </>
+    );
+  };
   const renderMovies = (searchPage = false) => (
     <section className="page-section">
       <div className="page-title-row"><div><div className="eyebrow">{searchPage ? 'Поиск и открытия' : 'Погрузитесь в мир кино'}</div><h1>{searchPage ? 'Что вы ищете?' : 'Фильмы и сериалы'}</h1><p>{searchPage ? 'Ищите по названию, жанру или описанию.' : 'Новые истории и знакомые эмоции.'}</p></div><div className="catalog-count"><span>{filteredFilms.length.toString().padStart(2, '0')}</span><small>историй</small></div></div>
       <form className="large-search" onSubmit={submitSearch}><Search size={18} /><input className="main-search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название фильма, сериала или жанр..." aria-label="Найти фильм или сериал" /><kbd>/</kbd><button type="submit" aria-label="Искать"><ArrowRight size={18} /></button></form>
       <div className="catalog-toolbar"><div className="chip-row">{filters.map((item) => <button key={item} className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="sort-button" onClick={() => setFilter(filter === 'Новинки' ? 'Всё' : 'Новинки')}><SlidersHorizontal size={15} /> Сортировка <ChevronDown size={14} /></button></div>
       {catalogError && <ErrorState onRetry={() => setCatalogError(false)} />}
-      <div className="result-label"><span>{searchPage ? 'Результаты поиска' : 'Каталог'}</span><span>{query ? `По запросу «${query}»` : 'Подборка TurboMedia'}</span></div>
+      <div className="result-label"><span>{searchPage ? 'Результаты поиска' : 'Каталог'}</span><span>{query ? `По запросу «${query}»` : 'Подборка КИНОВОЛНА'}</span></div>
       {renderFilmGrid(filteredFilms)}
     </section>
   );
 
   const renderMusic = () => {
+    const recentlySelectedTracks = recentTrackIds.map((id) => tracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
     if (selectedArtist) {
       const artistTracks = tracks.filter((track) => track.artist === selectedArtist);
       const isFollowed = followedArtists.includes(selectedArtist);
@@ -367,7 +441,16 @@ function App() {
       <section className="page-section music-page">
         <div className="music-welcome"><div className="music-welcome-copy"><div className="eyebrow"><span className="overline-dot" /> ПРОСТРАНСТВО ЗВУКА</div><h1>Найдите<br /><em>свой ритм.</em></h1><p>Выбирайте ритм, открывайте новых исполнителей и собирайте свою музыку.</p><button className="button button-primary" onClick={() => openUnavailable('Распознавание музыки в разработке', 'Микрофон и настоящий сервис распознавания пока не подключены. Случайные результаты не показываются.', 'Нужен настоящий сервис')}><Mic2 size={17} /> Распознать музыку <span className="button-live-dot" /></button></div><div className="music-visual"><div className="vinyl vinyl-back" /><div className="vinyl vinyl-front"><div className="vinyl-center"><AudioLines size={21} /></div></div><div className="music-visual-label"><Disc3 size={14} /> ИСТОЧНИК НЕ ПОДКЛЮЧЁН</div></div></div>
 
-        <div className="music-toolbar"><div><div className="eyebrow">Слушайте по настроению</div><h2>Плейлисты</h2></div><button className="text-action" onClick={() => openUnavailable('Плейлисты-примеры', 'Эти карточки показывают будущую библиотеку. Реальное сохранение пользовательских плейлистов будет добавлено вместе с backend.')}>Все подборки <ArrowRight size={15} /></button></div>
+        <div className="music-toolbar"><div><div className="eyebrow">Выберите настроение</div><h2>Музыкальные волны</h2></div><Tag>Подборки-примеры</Tag></div>
+        <div className="mood-grid">
+          {moodWaves.map((mood, index) => (
+            <button key={mood.id} className={`mood-card ${mood.className} ${selectedMusicMood === mood.id ? 'mood-card-active' : ''}`} aria-pressed={selectedMusicMood === mood.id} onClick={() => { setSelectedMusicMood((current) => current === mood.id ? null : mood.id); setMusicMode('all'); }}>
+              <span className="mood-symbol">{mood.symbol}</span><span className="mood-name">{mood.title}</span><span className="mood-sub">{mood.subtitle}</span><span className="mood-arrow">{String(index + 1).padStart(2, '0')}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="music-toolbar"><div><div className="eyebrow">Подборки для разного настроения</div><h2>Плейлисты</h2></div><button className="text-action" onClick={() => openUnavailable('Плейлисты-примеры', 'Эти карточки показывают будущую библиотеку. Реальное сохранение пользовательских плейлистов будет добавлено вместе с backend.')}>Все подборки <ArrowRight size={15} /></button></div>
         <div className="playlist-grid">{playlists.map((playlist) => <button key={playlist.title} className={`playlist-card ${playlist.className}`} onClick={() => openUnavailable(playlist.title, 'Это пример плейлиста. Для реального прослушивания нужны разрешённые аудиофайлы или потоковый источник.', 'Источник музыки не подключён')}><span className="playlist-disc"><AudioLines size={20} /></span><span className="playlist-title">{playlist.title}</span><span className="playlist-subtitle">{playlist.subtitle} · {playlist.tracks} треков</span><span className="playlist-arrow"><Play size={14} fill="currentColor" /></span></button>)}</div>
 
         <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Тестовый каталог</Tag></div>
@@ -375,9 +458,12 @@ function App() {
 
         <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Трек, альбом или исполнитель</div><h2>Музыкальная библиотека</h2></div><Tag>Аудиоисточник не подключён</Tag></div>
         <form className="large-search music-search" onSubmit={(event) => event.preventDefault()}><Search size={18} /><input value={musicQuery} onChange={(event) => setMusicQuery(event.target.value)} placeholder="Найти песню, альбом или исполнителя..." aria-label="Поиск музыки" /><button type="button" className="music-favorite-filter" onClick={() => setMusicMode((mode) => mode === 'all' ? 'favorites' : 'all')} aria-label="Переключить избранные треки"><Heart size={15} fill={musicMode === 'favorites' ? 'currentColor' : 'none'} /></button></form>
-        <div className="music-list-toolbar"><div className="chip-row"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все треки</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}><Heart size={12} /> Избранное</button></div><span>{filteredTracks.length} треков</span></div>
+        <div className="music-list-toolbar"><div className="chip-row"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все треки</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}><Heart size={12} /> Избранное</button>{selectedMusicMood && <button className="filter-chip active" onClick={() => setSelectedMusicMood(null)}>Волна: {moodWaves.find((mood) => mood.id === selectedMusicMood)?.title ?? 'настроение'} <X size={12} /></button>}</div><span>{filteredTracks.length} треков</span></div>
         {renderTrackList(filteredTracks)}
         <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Микрофон не используется, пока не подключён настоящий сервис распознавания.</span></div><button onClick={() => openUnavailable('Распознавание музыки в разработке', 'Понадобятся API-ключ и настоящий сервис распознавания. Пока нет ни записи с микрофона, ни выдуманных результатов.', 'Требуется подключение')}>Подробнее <ChevronRight size={14} /></button></div>
+        <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">Ваша история</div><h2>Недавно слушали</h2></div><Tag>Демо · последние выборы</Tag></div>
+        {recentlySelectedTracks.length ? renderTrackList(recentlySelectedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Выбранные треки появятся здесь. В прототипе это демо-история, а не подтверждённое воспроизведение.</span></div>}
+        <p className="recent-music-note">После подключения разрешённого аудио здесь будут отображаться последние реально прослушанные песни.</p>
       </section>
     );
   };
@@ -389,7 +475,7 @@ function App() {
     return (
       <section className="page-section profile-page">
         <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и недавно просмотренное.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Настройки появятся позже', 'Безопасный вход через Telegram, профиль и настройки добавим на этапе backend. Пароль не потребуется.')} aria-label="Настройки"><Settings2 size={19} /></button></div>
-        <div className="profile-card"><div className="profile-avatar"><span>TM</span><i /></div><div className="profile-main"><div className="profile-name">Пользователь Telegram <Tag>Профиль-пример</Tag></div><span className="profile-muted"><ShieldCheck size={14} /> Аккаунт Telegram пока не подключён</span></div><button className="button button-glass profile-connect" onClick={() => openUnavailable('Аккаунт Telegram пока не подключён', 'При запуске Mini App в Telegram подпись initData будет проверяться на сервере. Сейчас показан только пример профиля.')}>Не подключён <ChevronRight size={14} /></button></div>
+        <div className="profile-card"><div className="profile-avatar"><span>КВ</span><i /></div><div className="profile-main"><div className="profile-name">Пользователь Telegram <Tag>Профиль-пример</Tag></div><span className="profile-muted"><ShieldCheck size={14} /> Аккаунт Telegram пока не подключён</span></div><button className="button button-glass profile-connect" onClick={() => openUnavailable('Аккаунт Telegram пока не подключён', 'При запуске Mini App в Telegram подпись initData будет проверяться на сервере. Сейчас показан только пример профиля.')}>Не подключён <ChevronRight size={14} /></button></div>
         <div className="profile-stats"><div><span>{favorites.length.toString().padStart(2, '0')}</span><small>Фильмов в избранном</small></div><div><span>{recentFilms.length.toString().padStart(2, '0')}</span><small>Недавно просмотрено</small></div><div><span>{musicFavorites.length.toString().padStart(2, '0')}</span><small>Треков сохранено</small></div></div>
         <section className="content-section profile-content"><SectionHeading eyebrow="Вернитесь к просмотру" title="Недавно просмотренное" />{recentFilms.length ? <div className="film-grid">{recentFilms.map((film) => <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />)}</div> : <EmptyState onReset={() => goTo('movies')} />}</section>
         <section className="content-section profile-content"><SectionHeading eyebrow="Только для вас" title="Избранные фильмы" action="Открыть каталог" onAction={() => goTo('movies')} />{savedFilms.length ? <div className="film-grid">{savedFilms.map((film) => <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />)}</div> : <EmptyState onReset={() => goTo('movies')} />}</section>
@@ -406,7 +492,6 @@ function App() {
         <div className="detail-content">
           <Tag bright>{film.kind === 'Сериал' ? 'Сериал' : film.genre}</Tag>
           <h1>{film.title}</h1>
-          <div className="detail-subtitle">{film.originalTitle}</div>
           <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year}<i />{film.duration}<i />{film.genre}</div>
           <p>{film.description}</p>
           <div className="detail-actions">
@@ -434,13 +519,13 @@ function App() {
         <div className="topbar-actions">
           <form className="top-search" onSubmit={submitSearch}><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск..." aria-label="Поиск по каталогу" /><kbd>/</kbd></form>
           <button className="icon-button notification-button" onClick={() => openUnavailable('Уведомления', 'Уведомления о новых материалах появятся после подключения Telegram-бота.')} aria-label="Уведомления"><Bell size={18} /><i /></button>
-          <button className="top-avatar" onClick={() => goTo('profile')} aria-label="Открыть профиль"><span>TM</span></button>
+          <button className="top-avatar" onClick={() => goTo('profile')} aria-label="Открыть профиль"><span>КВ</span></button>
         </div>
       </header>
       <main className={`main-content ${selectedFilm ? 'main-detail' : ''}`}>
         {!selectedFilm && section !== 'home' && <div className="mobile-page-label"><Logo /><span>{section === 'music' ? 'Музыка' : section === 'movies' ? 'Кино' : section === 'search' ? 'Поиск' : 'Профиль'}</span></div>}
         {content}
-        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 TurboMedia <i /> Интерфейс · интеграции впереди</span></footer>
+        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> Интерфейс · интеграции впереди</span></footer>
       </main>
       <div className="mini-player">
         <button className={`mini-art ${activeTrack?.coverStyle ?? ''}`} onClick={() => setPlayerOpen(true)} aria-label="Открыть плеер"><AudioLines size={17} /></button>
@@ -457,7 +542,7 @@ function App() {
         <div className={`player-cover ${activeTrack?.coverStyle ?? 'cover-moon'}`}><AudioLines size={45} /></div>
         <Tag><Disc3 size={13} /> ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН</Tag>
         <h2>{activeTrack?.title ?? 'Выберите трек'}</h2>
-        <button className="player-artist" onClick={() => { if (activeTrack) { setPlayerOpen(false); setSelectedArtist(activeTrack.artist); setSection('music'); } }}>{activeTrack?.artist ?? 'TurboMedia'}</button>
+        <button className="player-artist" onClick={() => { if (activeTrack) { setPlayerOpen(false); setSelectedArtist(activeTrack.artist); setSection('music'); } }}>{activeTrack?.artist ?? 'КИНОВОЛНА'}</button>
         <div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div>
         <div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div>
         <div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div>

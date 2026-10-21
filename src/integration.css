@@ -12,3 +12,66 @@
 .channel-hero p { white-space: pre-line; overflow-wrap: anywhere; }
 .button:disabled { opacity: .6; cursor: not-allowed; }
 @media (max-width: 760px) { .catalog-status { flex-direction: column; align-items: stretch; padding: 15px; } .catalog-status-actions { flex-wrap: wrap; } .channel-hero .hero-copy { padding: 24px; } }
+
+/* Cinematic selection: a short cyan/mint beam ignites exactly the chosen poster. */
+.film-card-igniting { position: relative; z-index: 8; }
+.film-card-igniting .poster-button {
+  position: relative;
+  isolation: isolate;
+  animation: kinovolna-poster-ignite 680ms cubic-bezier(.16,.82,.24,1) both;
+  will-change: filter;
+}
+.film-card-igniting .poster-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: 14px;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 52% 48%, rgba(202,255,248,.72) 0%, rgba(84,236,255,.42) 21%, transparent 63%),
+    linear-gradient(112deg, transparent 25%, rgba(231,255,255,.72) 47%, rgba(91,236,255,.28) 52%, transparent 70%);
+  mix-blend-mode: screen;
+  animation: kinovolna-light-sweep 680ms cubic-bezier(.16,.82,.24,1) both;
+}
+.film-card-igniting .poster-image-wrap {
+  box-shadow:
+    0 0 0 2px rgba(174,255,246,.94),
+    0 0 20px 4px rgba(74,232,255,.92),
+    0 0 54px 12px rgba(51,175,255,.58),
+    inset 0 0 30px rgba(150,255,252,.42);
+  animation: kinovolna-frame-flash 680ms ease-out both;
+}
+.film-card-igniting .poster-image { animation: kinovolna-image-flash 680ms ease-out both; }
+.film-card-igniting .film-title-button {
+  color: #e9ffff;
+  text-shadow: 0 0 12px rgba(76,230,255,.96), 0 0 26px rgba(94,177,255,.72);
+}
+@keyframes kinovolna-poster-ignite {
+  0%,100% { filter: drop-shadow(0 0 0 rgba(81,224,255,0)); transform: scale(1); }
+  22% { filter: drop-shadow(0 0 27px rgba(86,232,255,1)) brightness(1.32); transform: scale(1.025); }
+  52% { filter: drop-shadow(0 0 38px rgba(80,179,255,.92)) brightness(1.16); transform: scale(1.012); }
+}
+@keyframes kinovolna-light-sweep {
+  0% { opacity: 0; transform: translateX(-20%) scale(.92); }
+  22% { opacity: 1; }
+  55% { opacity: .84; transform: translateX(4%) scale(1.02); }
+  100% { opacity: 0; transform: translateX(18%) scale(1.04); }
+}
+@keyframes kinovolna-frame-flash {
+  0%,100% { box-shadow: 0 0 0 0 rgba(174,255,246,0), 0 0 0 0 rgba(74,232,255,0), 0 0 0 rgba(51,175,255,0); }
+  22% { box-shadow: 0 0 0 2px rgba(214,255,250,.98), 0 0 24px 7px rgba(74,232,255,.95), 0 0 64px 17px rgba(51,175,255,.7), inset 0 0 32px rgba(150,255,252,.55); }
+  55% { box-shadow: 0 0 0 1px rgba(174,255,246,.76), 0 0 17px 3px rgba(74,232,255,.72), 0 0 43px 9px rgba(51,175,255,.42), inset 0 0 20px rgba(150,255,252,.27); }
+}
+@keyframes kinovolna-image-flash {
+  0%,100% { filter: brightness(1) saturate(1); }
+  23% { filter: brightness(1.6) saturate(1.24); }
+  56% { filter: brightness(1.22) saturate(1.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .film-card-igniting .poster-button,
+  .film-card-igniting .poster-button::after,
+  .film-card-igniting .poster-image-wrap,
+  .film-card-igniting .poster-image { animation-duration: .01ms; }
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -98,9 +98,30 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
   isFavorite: boolean;
   onFavorite: () => void;
 }) {
+  const [isIgniting, setIsIgniting] = useState(false);
+  const igniteTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (igniteTimer.current !== null) window.clearTimeout(igniteTimer.current);
+  }, []);
+
+  const openWithGlow = () => {
+    if (igniteTimer.current !== null) window.clearTimeout(igniteTimer.current);
+    setIsIgniting(true);
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      onOpen();
+      return;
+    }
+    igniteTimer.current = window.setTimeout(() => {
+      igniteTimer.current = null;
+      onOpen();
+    }, 680);
+  };
+
   return (
-    <article className="film-card">
-      <button className="poster-button" onClick={onOpen} aria-label={`Подробнее: ${film.title}`}>
+    <article className={`film-card ${isIgniting ? 'film-card-igniting' : ''}`} aria-busy={isIgniting}>
+      <button className="poster-button" onClick={openWithGlow} aria-label={`Подробнее: ${film.title}`}>
         <div className="poster-image-wrap">
           <img className="poster-image" src={film.poster} alt={`Обложка: ${film.title}`} loading="lazy" onError={(event) => { event.currentTarget.style.opacity = '0'; }} />
           {film.badge && <span className={`poster-badge ${['Новинка', 'Премьера'].includes(film.badge) ? 'poster-badge-mint' : ''}`}>{film.badge}</span>}
@@ -111,7 +132,7 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
       </button>
       <div className="film-meta-row">
         <div className="film-meta-copy">
-          <button className="film-title-button" onClick={onOpen}>{film.title}</button>
+          <button className="film-title-button" onClick={openWithGlow}>{film.title}</button>
           <span>{film.year || 'Год не указан'}<i />{film.genre}</span>
         </div>
         <button className={`icon-button favorite-button ${isFavorite ? 'is-favorite' : ''}`} onClick={onFavorite} aria-label={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}>

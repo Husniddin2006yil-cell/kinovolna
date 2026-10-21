@@ -11,6 +11,9 @@ export type Film = {
   badge?: string;
   kind: 'Фильм' | 'Сериал';
   episodes?: string[];
+  source?: 'telegram';
+  channelId?: string;
+  messageId?: number;
 };
 
 export type Track = {

@@ -37,3 +37,18 @@
 ## Nashr holati
 
 - [ ] Foydalanuvchi aniq ruxsat bermaguncha public publish yoki server deploy qilinmaydi. Hozirgi ish private GitHub repository va lokal/Preview tekshiruv bilan cheklanadi.
+
+## Второй этап — Telegram backend (2026-10-21)
+
+- [x] Рабочий backend Telegram Bot API в существующем репозитории, без удаления кода и пересоздания проекта: webhook принимает новые и отредактированные публикации только настроенного канала; название, описание, channel_id и message_id сохраняются в PostgreSQL без дублей.
+- [x] Кнопка «Получить в Telegram» открывает соответствующую публикацию в боте или канале; сервер проверяет доступ пользователя к закрытому каналу. Демо-фильмы не получают выдуманных ссылок.
+- [x] Bot token, webhook secret, DATABASE_URL и API-ключи хранятся только на сервере в env, не в frontend/GitHub. Серверная проверка HMAC подписи Telegram Mini App initData, срока действия и numeric user ID; приватный каталог и admin API защищены.
+- [x] Подключение PostgreSQL, миграция, API каталога, защищённый импорт старых публикаций и инструкция запуска/деплоя. Онлайн-воспроизведение не обещается без реального доступного разрешённого источника видео.
+- [x] Проверить сборку, API и ошибки автоматическими тестами и локальной PostgreSQL; отправить изменения в существующий GitHub с сохранением истории, без force push.
+- [ ] Реально подключить пользовательского Telegram-бота/канал и production-БД после получения username, channel ID, admin ID, защищённого bot token и данных хостинга; отдельно перечислить работающие функции и оставшуюся настройку.
+
+### Ikkinchi bosqichning tekshirilgan chegarasi
+
+Yuqoridagi amalga oshirilgan kod lokal PostgreSQL va ataylab belgilangan Telegram test double bilan tekshirildi: `pnpm build`, `pnpm typecheck`, 14 unit/security test va 12 integratsion test muvaffaqiyatli. HTTP orqali production rejimida frontend, `/api/health`, `/api/ready`, maxfiy sozlanmagan API xatolari tekshirildi. Secret scan va `pnpm audit --prod` toza. Mavjud fayllar o‘chirilmagan.
+
+Haqiqiy Telegram tokeni, kanal/admin IDlari va hosting hali berilmagan; live Bot API/webhook, production PostgreSQL va Docker image build/deploy tekshirilmagan. Mini App va botning user-facing matnlari rus tilida; foydalanuvchiga izoh va sozlash qo‘llanmasi o‘zbekcha. Oldingi bo‘limlardagi ko‘p shartli kelajak punktlari ushbu bosqichda to‘liq bajarilgan deb belgilanmagan.

@@ -1,6 +1,20 @@
 # КИНОВОЛНА — медиаплатформа для Telegram Mini App
 
-Цель КИНОВОЛНА — подключить Mini App к вашему существующему Telegram-боту и объединить в одном интерфейсе фильмы, сериалы и музыку. Сейчас собирается первая визуальная версия интерфейса. Она не выдаёт демонстрационные кнопки за работающие интеграции: Telegram-канал, бот, онлайн-видео, реальный аудиопоток и распознавание музыки будут подключаться отдельными этапами.
+Цель КИНОВОЛНА — подключить Mini App к вашему существующему Telegram-боту и объединить в одном интерфейсе фильмы, сериалы и музыку. Вторая версия сохраняет первый интерфейс и добавляет сервер Telegram Bot API, PostgreSQL и API каталога. Реальная связь с вашим ботом требует серверного токена, ID канала, прав администратора и HTTPS-хостинга. Онлайн-видео, реальный аудиопоток и распознавание музыки пока не подключены.
+
+## Ikkinchi bosqich: backend va Telegram
+
+Mavjud kod va Git tarixi saqlangan. `server/` Telegram webhook, Mini App HMAC tekshiruvi, yopiq kanal a’zoligi nazorati va katalog API uchun qo‘shilgan. `scripts/` bazaning migratsiyasi va botni tekshirish/ulash buyruqlarini beradi. Telegram yangiliklari PostgreSQLga yoziladi; «Получить в Telegram» faqat bazadagi haqiqiy film uchun bot yoki kanal postiga olib boradi. Demo ma’lumotlar `src/data.ts`da saqlanadi, faqat «Посмотреть демо» orqali alohida ochiladi.
+
+To‘liq sozlash, Windows/Linux, Docker Compose va eski postlarni import qilish: **[Ikkinchi bosqich qo‘llanmasi](docs/stage-2-setup.md)**.
+
+Qisqa lokal yo‘l: `pnpm install --frozen-lockfile`, `.env.example`dan `.env` nusxasi, PostgreSQL uchun `DATABASE_URL`ni to‘ldirish, `pnpm db:migrate`, so‘ng `pnpm dev`. Frontend `http://localhost:3000`, API `http://localhost:3001`. `pnpm dev:web` faqat frontend, `pnpm dev:server` faqat API. `pnpm preview` faqat buildni ko‘rsatadi — backend emas. Production uchun `pnpm build`, keyin `NODE_ENV=production pnpm start`; Windows PowerShell: `$env:NODE_ENV='production'; pnpm start`.
+
+Bot uchun `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_CHANNEL_ID`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_WEBHOOK_SECRET` kerak. Token va baza paroli faqat server `.env` yoki hosting secretsda bo‘lsin; **hech qachon `VITE_*`da emas**. Botingiz kanal administratori bo‘lishi kerak. `pnpm telegram:check` mavjud botga faqat tekshiruv so‘rovlari qiladi. HTTPS server tayyor bo‘lgach, `pnpm telegram:webhook` va `pnpm telegram:menu` qo‘lda bajariladi; mavjud webhook avtomatik almashtirilmaydi.
+
+Tekshiruvlar: `pnpm typecheck`, `pnpm build`, `pnpm test`. Alohida sinov PostgreSQL bazasi bilan `TEST_DATABASE_URL=… pnpm test:integration`. Sinovlar haqiqiy PostgreSQLdan foydalanadi, Telegram tarmog‘i esa aniq belgilangan test double bilan tekshiriladi. Bu foydalanuvchining haqiqiy boti allaqachon ulanganini anglatmaydi.
+
+Yopiq kanalning eski tarixini Bot API avtomatik bera olmaydi. Admin import API mavjud, ammo eski post IDlari va tavsiflarini alohida tayyorlash kerak. Haqiqiy video URL yo‘q: `/api/films/:id/playback` `503 video_source_not_configured` qaytaradi. Top‑10/Top‑20, real musiqa, tashqi metadata API, akkauntga sinxronlangan sevimlilar va video streaming ushbu bosqichda amalga oshirilmagan. Quyidagi dastlabki bosqich qaydlari tarix va dizayn izohi sifatida saqlangan.
 
 ## Запуск в Windows
 

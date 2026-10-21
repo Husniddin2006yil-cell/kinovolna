@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -32,8 +32,9 @@ import {
   SkipBack,
   SkipForward,
 } from 'lucide-react';
-import { films, generatedArt, tracks, type Film as FilmItem, type Track } from './data';
-import { openFilmInTelegram, requestFilmPlayback } from './telegram';
+import { films as demoFilms, generatedArt, tracks, type Film as FilmItem, type Track } from './data';
+import { getTelegramWebApp, loadTelegramCatalog, openFilmInTelegram, requestFilmPlayback, type TelegramUser } from './telegram';
+import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
 type Notice = { title: string; body: string; label?: string };
@@ -111,7 +112,7 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
       <div className="film-meta-row">
         <div className="film-meta-copy">
           <button className="film-title-button" onClick={onOpen}>{film.title}</button>
-          <span>{film.year}<i />{film.genre}</span>
+          <span>{film.year || 'Год не указан'}<i />{film.genre}</span>
         </div>
         <button className={`icon-button favorite-button ${isFavorite ? 'is-favorite' : ''}`} onClick={onFavorite} aria-label={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}>
           <Heart size={17} fill={isFavorite ? 'currentColor' : 'none'} />
@@ -216,6 +217,11 @@ function App() {
   const [section, setSection] = useState<Section>('home');
   const [query, setQuery] = useState('');
   const [musicQuery, setMusicQuery] = useState('');
+  const [films, setFilms] = useState<FilmItem[]>([]);
+  const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'demo' | 'blocked'>('loading');
+  const [catalogMessage, setCatalogMessage] = useState('');
+  const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
   const [filter, setFilter] = useState('Всё');
   const [musicMode, setMusicMode] = useState<'all' | 'favorites'>('all');
   const [selectedMusicMood, setSelectedMusicMood] = useState<string | null>(null);
@@ -232,6 +238,43 @@ function App() {
   const [isSplashLeaving, setIsSplashLeaving] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+
+  const reloadCatalog = useCallback(async () => {
+    setCatalogMode('loading');
+    setCatalogError(false);
+    setSelectedFilm(null);
+    setFilms([]);
+    setTelegramUser(null);
+    try {
+      const result = await loadTelegramCatalog();
+      setFilms(result.films);
+      setTelegramUser(result.user);
+      setCatalogMode('telegram');
+      setCatalogMessage(result.films.length ? 'Каталог загружен из публикаций вашего Telegram-канала.' : 'В базе пока нет публикаций. Опубликуйте фильм в канале после подключения webhook или импортируйте старые записи.');
+      if (result.startParam?.startsWith('film_')) {
+        const film = result.films.find((item) => item.id === result.startParam!.slice(5));
+        if (film) setSelectedFilm(film);
+      }
+    } catch (error) {
+      setCatalogMode('blocked');
+      setCatalogError(true);
+      setCatalogMessage(error instanceof Error ? error.message : 'Не удалось загрузить каталог.');
+    }
+  }, []);
+
+  useEffect(() => {
+    getTelegramWebApp()?.ready?.();
+    void reloadCatalog();
+  }, [reloadCatalog]);
+
+  const showDemoCatalog = () => {
+    setFilms(demoFilms);
+    setSelectedFilm(null);
+    setTelegramUser(null);
+    setCatalogMode('demo');
+    setCatalogError(false);
+    setCatalogMessage('Демонстрационный каталог: эти фильмы не связаны с вашим каналом. Реальные Telegram-ссылки и воспроизведение для них недоступны.');
+  };
 
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -294,7 +337,7 @@ function App() {
         || film.genre === filter;
       return matchesQuery && matchesFilter;
     });
-  }, [filter, query]);
+  }, [films, filter, query]);
 
   const filteredTracks = useMemo(() => {
     const normalized = musicQuery.trim().toLocaleLowerCase();
@@ -330,14 +373,27 @@ function App() {
 
   const openUnavailable = (title: string, body: string, label = 'Интеграция не подключена') => setNotice({ title, body, label });
 
-  const handleTelegramAction = (film: FilmItem) => {
-    const result = openFilmInTelegram(film.id);
-    if (!result.ok) openUnavailable('Telegram-бот пока не подключён', 'Кнопка уже подготовлена для deep link вида startapp=film_<id>. Добавьте VITE_TELEGRAM_BOT_USERNAME и подключите Bot API на backend.', 'Нужна настройка Telegram');
+  const handleTelegramAction = async (film: FilmItem) => {
+    if (film.source !== 'telegram') {
+      openUnavailable('Это демонстрационный фильм', 'Для этого примера нет публикации в вашем канале. Подключите backend и загрузите реальный каталог.', 'Демо · нет Telegram-публикации');
+      return;
+    }
+    setTelegramBusy(true);
+    try {
+      const result = await openFilmInTelegram(film.id);
+      if (!result.ok) openUnavailable('Не удалось открыть Telegram', result.message ?? 'Проверьте настройки бота и доступ к закрытому каналу.', 'Telegram · проверка доступа');
+    } finally {
+      setTelegramBusy(false);
+    }
   };
 
   const handleWatchAction = async (film: FilmItem) => {
+    if (film.source !== 'telegram') {
+      openUnavailable('Источник онлайн-видео не подключён', 'Демо-карточка не содержит видео. Пост Telegram также не является прямой ссылкой для HTML5-плеера.', 'Нужен реальный видеосервис');
+      return;
+    }
     const result = await requestFilmPlayback(film.id);
-    if (!result.ok) openUnavailable(result.reason === 'failed' ? 'Не удалось открыть просмотр' : 'Источник онлайн-видео не подключён', result.reason === 'failed' ? 'Backend не вернул рабочую ссылку на видео. Проверьте endpoint /api/films/:id/playback.' : 'Кнопка готова к backend endpoint /api/films/:id/playback. Пока разрешённый видеопоток не настроен, фиктивная ссылка не открывается.', result.reason === 'failed' ? 'Ошибка backend' : 'Нужно подключить видеосервис');
+    if (!result.ok) openUnavailable(result.reason === 'failed' ? 'Не удалось открыть просмотр' : 'Источник онлайн-видео не подключён', result.message ?? 'Пока разрешённый видеопоток не настроен, фиктивная ссылка не открывается.', result.reason === 'failed' ? 'Ошибка backend' : 'Нужно подключить видеосервис');
   };
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -396,6 +452,7 @@ function App() {
 
     return (
       <>
+        {catalogMode === 'demo' ? (
         <section className="hero-card" style={{ backgroundImage: `linear-gradient(90deg, rgba(7,10,18,.98) 0%, rgba(7,10,18,.76) 35%, rgba(7,10,18,.12) 100%), linear-gradient(0deg, rgba(7,10,18,.5), transparent 52%), url("${generatedArt.hero}")` }}>
           <div className="hero-topline"><Tag bright><Sparkles size={12} /> Выбор недели</Tag><span className="hero-index">01 <i /> 04</span></div>
           <div className="hero-copy">
@@ -410,15 +467,25 @@ function App() {
           </div>
           <div className="hero-caption"><span className="caption-line" /> Почувствуйте атмосферу кино</div>
         </section>
+        ) : (
+          <section className="hero-card channel-hero">
+            <div className="hero-copy">
+              <Tag bright><Film size={13} /> Каталог Telegram-канала</Tag>
+              <h1>{films[0]?.title ?? 'Ваше кино.'}</h1>
+              <p>{films[0]?.description || catalogMessage || 'Загружаем публикации вашего канала…'}</p>
+              {films[0] && <button className="button button-primary" onClick={() => openFilm(films[0])}>Подробнее <ArrowRight size={16} /></button>}
+            </div>
+          </section>
+        )}
 
         <section className="content-section home-rail-section rail-now">
-          <SectionHeading eyebrow="Демо-подборка" title="Сейчас смотрят" action="Весь каталог" onAction={() => goTo('movies')} />
+          <SectionHeading eyebrow={catalogMode === 'demo' ? 'Демо-подборка' : 'Публикации канала'} title={catalogMode === 'demo' ? 'Сейчас смотрят' : 'Фильмы из канала'} action="Весь каталог" onAction={() => goTo('movies')} />
           {renderFilmRail(sortedByRating.slice(0, 5))}
-          <p className="home-demo-note">Пока это демонстрационный каталог; реальные просмотры подключим вместе с backend.</p>
+          <p className="home-demo-note">{catalogMode === 'demo' ? 'Демонстрационный каталог; реальные просмотры не учитываются.' : 'Это публикации канала, а не статистика просмотров. Онлайн-видеопоток не подключён.'}</p>
         </section>
 
         <section className="content-section home-rail-section rail-popular">
-          <SectionHeading eyebrow="Высокие оценки · пример" title="Популярное" action="Смотреть всё" onAction={() => goTo('movies')} />
+          <SectionHeading eyebrow={catalogMode === 'demo' ? 'Высокие оценки · пример' : 'Ваш каталог'} title={catalogMode === 'demo' ? 'Популярное' : 'Выбрать фильм'} action="Смотреть всё" onAction={() => goTo('movies')} />
           {renderFilmRail(sortedByRating.slice(0, 4))}
         </section>
 
@@ -445,7 +512,7 @@ function App() {
       <div className="page-title-row"><div><div className="eyebrow">{searchPage ? 'Поиск и открытия' : 'Погрузитесь в мир кино'}</div><h1>{searchPage ? 'Что вы ищете?' : 'Фильмы и сериалы'}</h1><p>{searchPage ? 'Ищите по названию, жанру или описанию.' : 'Новые истории и знакомые эмоции.'}</p></div><div className="catalog-count"><span>{filteredFilms.length.toString().padStart(2, '0')}</span><small>историй</small></div></div>
       <form className="large-search" onSubmit={submitSearch}><Search size={18} /><input className="main-search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название фильма, сериала или жанр..." aria-label="Найти фильм или сериал" /><kbd>/</kbd><button type="submit" aria-label="Искать"><ArrowRight size={18} /></button></form>
       <div className="catalog-toolbar"><div className="chip-row">{filters.map((item) => <button key={item} className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="sort-button" onClick={() => setFilter(filter === 'Новинки' ? 'Всё' : 'Новинки')}><SlidersHorizontal size={15} /> Сортировка <ChevronDown size={14} /></button></div>
-      {catalogError && <ErrorState onRetry={() => setCatalogError(false)} />}
+      {catalogError && <ErrorState onRetry={() => void reloadCatalog()} />}
       <div className="result-label"><span>{searchPage ? 'Результаты поиска' : 'Каталог'}</span><span>{query ? `По запросу «${query}»` : 'Подборка КИНОВОЛНА'}</span></div>
       {renderFilmGrid(filteredFilms)}
     </section>
@@ -504,13 +571,13 @@ function App() {
     const savedTracks = tracks.filter((track) => musicFavorites.includes(track.id));
     return (
       <section className="page-section profile-page">
-        <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и недавно просмотренное.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Настройки появятся позже', 'Безопасный вход через Telegram, профиль и настройки добавим на этапе backend. Пароль не потребуется.')} aria-label="Настройки"><Settings2 size={19} /></button></div>
-        <div className="profile-card"><div className="profile-avatar"><span>КВ</span><i /></div><div className="profile-main"><div className="profile-name">Пользователь Telegram <Tag>Профиль-пример</Tag></div><span className="profile-muted"><ShieldCheck size={14} /> Аккаунт Telegram пока не подключён</span></div><button className="button button-glass profile-connect" onClick={() => openUnavailable('Аккаунт Telegram пока не подключён', 'При запуске Mini App в Telegram подпись initData будет проверяться на сервере. Сейчас показан только пример профиля.')}>Не подключён <ChevronRight size={14} /></button></div>
-        <div className="profile-stats"><div><span>{favorites.length.toString().padStart(2, '0')}</span><small>Фильмов в избранном</small></div><div><span>{recentFilms.length.toString().padStart(2, '0')}</span><small>Недавно просмотрено</small></div><div><span>{musicFavorites.length.toString().padStart(2, '0')}</span><small>Треков сохранено</small></div></div>
-        <section className="content-section profile-content"><SectionHeading eyebrow="Вернитесь к просмотру" title="Недавно просмотренное" />{recentFilms.length ? <div className="film-grid">{recentFilms.map((film) => <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />)}</div> : <EmptyState onReset={() => goTo('movies')} />}</section>
+        <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и открытые карточки. Избранное хранится на этом устройстве.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Профиль и настройки', 'Вход подтверждается сервером через Telegram initData. Избранное пока сохраняется локально, а не в аккаунте. Пароль Telegram не требуется.', 'Информация')} aria-label="Настройки"><Settings2 size={19} /></button></div>
+        <div className="profile-card"><div className="profile-avatar"><span>{telegramUser?.first_name.slice(0, 2) ?? 'КВ'}</span><i /></div><div className="profile-main"><div className="profile-name">{telegramUser ? [telegramUser.first_name, telegramUser.last_name].filter(Boolean).join(' ') : 'Гостевой профиль'} <Tag>{telegramUser ? 'Подпись проверена' : 'Не авторизован'}</Tag></div><span className="profile-muted"><ShieldCheck size={14} /> {telegramUser ? `Telegram ID: ${telegramUser.id}` : 'Откройте Mini App в Telegram для входа'}</span></div><button className="button button-glass profile-connect" onClick={() => void reloadCatalog()}>{telegramUser ? 'Обновить вход' : 'Проверить вход'} <ChevronRight size={14} /></button></div>
+        <div className="profile-stats"><div><span>{favorites.length.toString().padStart(2, '0')}</span><small>Фильмов в избранном</small></div><div><span>{recentFilms.length.toString().padStart(2, '0')}</span><small>Открытых карточек</small></div><div><span>{musicFavorites.length.toString().padStart(2, '0')}</span><small>Треков сохранено</small></div></div>
+        <section className="content-section profile-content"><SectionHeading eyebrow="Ваша история карточек" title="Недавно открывали" />{recentFilms.length ? <div className="film-grid">{recentFilms.map((film) => <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />)}</div> : <EmptyState onReset={() => goTo('movies')} />}</section>
         <section className="content-section profile-content"><SectionHeading eyebrow="Только для вас" title="Избранные фильмы" action="Открыть каталог" onAction={() => goTo('movies')} />{savedFilms.length ? <div className="film-grid">{savedFilms.map((film) => <FilmCard key={film.id} film={film} onOpen={() => openFilm(film)} isFavorite={favorites.includes(film.id)} onFavorite={() => toggleFilmFavorite(film.id)} />)}</div> : <EmptyState onReset={() => goTo('movies')} />}</section>
         <section className="content-section profile-content"><SectionHeading eyebrow="Ваша музыка" title="Избранные треки" action="К музыке" onAction={() => goTo('music')} />{renderTrackList(savedTracks)}</section>
-        <div className="privacy-note"><ShieldCheck size={17} /><span><strong>Конфиденциальность прежде всего.</strong> Мы не спрашиваем пароль от Telegram. Для реального профиля сервер проверит подпись Telegram Mini App.</span></div>
+        <div className="privacy-note"><ShieldCheck size={17} /><span><strong>Конфиденциальность прежде всего.</strong> Мы не спрашиваем пароль от Telegram. Приватный каталог доступен только после проверки подписи Mini App и членства в канале на сервере.</span></div>
       </section>
     );
   };
@@ -522,10 +589,10 @@ function App() {
         <div className="detail-content">
           <Tag bright>{film.kind === 'Сериал' ? 'Сериал' : film.genre}</Tag>
           <h1>{film.title}</h1>
-          <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year}<i />{film.duration}<i />{film.genre}</div>
+          <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year || 'Год не указан'}<i />{film.duration}<i />{film.genre}</div>
           <p>{film.description}</p>
           <div className="detail-actions">
-            <button className="button button-primary" onClick={() => handleTelegramAction(film)}><ArrowRight size={16} /> Получить в Telegram</button>
+            <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Проверяем доступ…' : 'Получить в Telegram'}</button>
             <button className="button button-glass" onClick={() => void handleWatchAction(film)}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
@@ -533,7 +600,7 @@ function App() {
         </div>
       </div>
       {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Первый сезон</div><h2>Серии</h2></div><button className="sort-button">Сезон 1 <ChevronDown size={14} /></button></div><div className="episode-list">{film.episodes?.map((episode, index) => <button key={episode} className="episode-row" onClick={() => openUnavailable('Видео пока не подключено', 'Источник видео серии и интеграция с Telegram-ботом пока не настроены.')}><span className="episode-number">{String(index + 1).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{episode}</strong><span className="episode-runtime">42 мин</span><ChevronRight size={16} /></button>)}</div></section>}
-      <div className="detail-legal"><ShieldCheck size={16} /><span>Сейчас показан пример каталога. Telegram-бот, публикации канала и реальные видеопотоки подключаются отдельно.</span></div>
+      <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с реальной публикацией канала. Доступ проверяется сервером; отдельный источник онлайн-видео не подключён.' : 'Сейчас показан пример каталога без соответствующего поста в канале и без видеопотока.'}</span></div>
     </section>
   );
 
@@ -554,8 +621,12 @@ function App() {
       </header>
       <main className={`main-content ${selectedFilm ? 'main-detail' : ''}`}>
         {!selectedFilm && section !== 'home' && <div className="mobile-page-label"><Logo /><span>{section === 'music' ? 'Музыка' : section === 'movies' ? 'Кино' : section === 'search' ? 'Поиск' : 'Профиль'}</span></div>}
+        <section className={`catalog-status catalog-status-${catalogMode}`} role="status" aria-live="polite">
+          <div><strong>{catalogMode === 'loading' ? 'Загружаем каталог…' : catalogMode === 'telegram' ? 'Telegram-каталог' : catalogMode === 'demo' ? 'Демо-режим' : 'Каталог не подключён'}</strong><p>{catalogMessage || 'Проверяем backend и Telegram-вход.'}</p></div>
+          <div className="catalog-status-actions"><button className="button button-glass" disabled={catalogMode === 'loading'} onClick={() => void reloadCatalog()}>Обновить каталог</button>{catalogMode !== 'telegram' && catalogMode !== 'demo' && <button className="button button-glass" onClick={showDemoCatalog}>Посмотреть демо</button>}</div>
+        </section>
         {content}
-        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> Интерфейс · интеграции впереди</span></footer>
+        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : 'Для реального каталога нужна настройка Telegram'}</span></footer>
       </main>
       <div className="mini-player">
         <button className={`mini-art ${activeTrack?.coverStyle ?? ''}`} onClick={() => setPlayerOpen(true)} aria-label="Открыть плеер"><AudioLines size={17} /></button>

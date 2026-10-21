@@ -1,0 +1,14 @@
+/* Stage 2: backend status is explicit; demo never masquerades as channel data. */
+.catalog-status { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px; margin-bottom: 22px; border: 1px solid rgba(94, 216, 225, .2); border-radius: 16px; background: rgba(18, 33, 42, .76); }
+.catalog-status strong { font-size: 14px; color: #d6f4f5; }
+.catalog-status p { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: #a1b4bc; }
+.catalog-status-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.catalog-status-actions .button { font-size: 11px; padding: 11px 13px; }
+.catalog-status-blocked { border-color: rgba(240, 184, 91, .24); }
+.catalog-status-demo { border-color: rgba(170, 177, 188, .2); }
+.channel-hero { height: auto; min-height: 320px; background: radial-gradient(ellipse at 80% 30%, rgba(23, 110, 130, .3), transparent 65%), #0b1420; }
+.channel-hero .hero-copy { position: relative; inset: auto; width: auto; max-width: 760px; padding: 36px; }
+.channel-hero h1 { font-size: clamp(28px, 5vw, 56px); overflow-wrap: anywhere; }
+.channel-hero p { white-space: pre-line; overflow-wrap: anywhere; }
+.button:disabled { opacity: .6; cursor: not-allowed; }
+@media (max-width: 760px) { .catalog-status { flex-direction: column; align-items: stretch; padding: 15px; } .catalog-status-actions { flex-wrap: wrap; } .channel-hero .hero-copy { padding: 24px; } }

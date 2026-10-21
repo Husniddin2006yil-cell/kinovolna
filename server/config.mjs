@@ -21,6 +21,44 @@ function validHttpsUrl(value) {
   }
 }
 
+function isNonPublicHostname(hostname) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const ipv4 = host.split('.').map(Number);
+  const isPrivateIpv4 = ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) && (() => {
+    const [a, b] = ipv4;
+    return a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168);
+  })();
+  const reservedHost = host === 'localhost'
+    || host.endsWith('.localhost')
+    || host.endsWith('.local')
+    || host.endsWith('.lan')
+    || host.endsWith('.home.arpa')
+    || host === 'example.com'
+    || host.endsWith('.example.com')
+    || host.endsWith('.example')
+    || host.endsWith('.invalid')
+    || host.endsWith('.test')
+    || host.endsWith('.manus.computer')
+    || host === '::1'
+    || host.startsWith('fc')
+    || host.startsWith('fd')
+    || /^fe[89ab][0-9a-f]:/i.test(host);
+  return reservedHost || isPrivateIpv4;
+}
+
+function validPublicHttpsUrl(value) {
+  const url = validHttpsUrl(value);
+  if (!url) return null;
+  try {
+    return isNonPublicHostname(new URL(url).hostname) ? null : url;
+  } catch {
+    return null;
+  }
+}
+
 function parseOrigins(value) {
   if (!value) return [];
   const origins = [];
@@ -105,8 +143,8 @@ export function readConfig(env = process.env) {
     })(),
     telegramChannelInviteUrl: inviteIsTelegram ? channelInviteUrl : null,
     telegramInitDataMaxAge: parseMaxAge(env.TELEGRAM_INIT_DATA_MAX_AGE),
-    publicBaseUrl: validHttpsUrl(nonEmpty(env.PUBLIC_BASE_URL)),
-    miniAppUrl: validHttpsUrl(nonEmpty(env.MINI_APP_URL)),
+    publicBaseUrl: validPublicHttpsUrl(nonEmpty(env.PUBLIC_BASE_URL)),
+    miniAppUrl: validPublicHttpsUrl(nonEmpty(env.MINI_APP_URL)),
     telegramConfigured: Boolean(botToken),
     databaseConfigured: Boolean(validDatabaseUrl(nonEmpty(env.DATABASE_URL))),
     channelConfigured: Boolean(channelCandidate && CHANNEL_ID_RE.test(channelCandidate) && isSignedBigInt(channelCandidate)),

@@ -272,7 +272,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     handler: (_request, response) => sendError(response, 429, 'rate_limited', 'Слишком много неподтверждённых запросов webhook.'),
   }), (request, response, next) => {
     if (request.method !== 'POST') return next();
-    if (!needs(response, Boolean(pool && config.databaseConfigured && config.telegramConfigured && config.channelConfigured && config.telegramWebhookSecret && telegramClient))) return;
+    if (!needs(response, Boolean(config.telegramConfigured && config.telegramWebhookSecret && telegramClient))) return;
     if (!safeEqualText(request.get('X-Telegram-Bot-Api-Secret-Token') || '', config.telegramWebhookSecret)) {
       return sendError(response, 401, 'invalid_webhook_secret', 'Некорректный секрет webhook.');
     }
@@ -409,6 +409,11 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const match = payload.match(/^film_([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
     if (!match) return;
 
+    if (!client || !pool || !config.databaseConfigured || !config.channelConfigured) {
+      await telegramClient.sendMessage(message.chat.id, 'Каталог фильмов пока не подключён. Откройте приложение через /start без параметров.');
+      return;
+    }
+
     let member;
     try {
       member = await telegramClient.getChatMember(config.telegramChannelId, message.from.id);
@@ -461,9 +466,28 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       return;
     }
     if (callback.data === 'admin_health') {
-      const backend = pool && config.databaseConfigured ? 'база данных: настроена' : 'база данных: не настроена';
-      const channel = config.channelConfigured ? 'канал: настроен' : 'канал: не настроен';
-      await telegramClient.sendMessage(chatId, `Состояние интеграций:\nTelegram Bot API: отвечает\n${backend}\n${channel}\nMini App URL: ${config.miniAppUrl ? 'настроен' : 'не настроен'}`);
+      let bot = null;
+      try {
+        bot = await telegramClient.getMe();
+      } catch {
+        // Show a safe status without exposing Bot API request details.
+      }
+      const telegramStatus = bot?.username
+        ? `Telegram Bot API: отвечает как @${bot.username}`
+        : 'Telegram Bot API: не удалось проверить';
+      const databaseStatus = pool && config.databaseConfigured ? 'база данных: настроена' : 'база данных: не настроена';
+      let channelStatus = config.channelConfigured ? 'канал: ID настроен, доступ не проверен' : 'канал: не настроен';
+      if (config.channelConfigured && bot?.id) {
+        try {
+          const membership = await telegramClient.getChatMember(config.telegramChannelId, bot.id);
+          channelStatus = membership?.status === 'administrator' || membership?.status === 'creator'
+            ? 'канал: бот — администратор'
+            : 'канал: боту не выданы права администратора';
+        } catch {
+          channelStatus = 'канал: не удалось проверить';
+        }
+      }
+      await telegramClient.sendMessage(chatId, `Состояние интеграций:\n${telegramStatus}\n${databaseStatus}\n${channelStatus}\nMini App URL: ${config.miniAppUrl ? 'настроен' : 'не настроен'}`);
     }
   }
 
@@ -566,7 +590,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   }));
 
   app.post('/api/telegram/webhook', asyncRoute(async (request, response) => {
-    if (!needs(response, Boolean(pool && config.databaseConfigured && config.telegramConfigured && config.channelConfigured && config.telegramWebhookSecret && telegramClient))) return;
+    if (!needs(response, Boolean(config.telegramConfigured && config.telegramWebhookSecret && telegramClient))) return;
     if (!safeEqualText(request.get('X-Telegram-Bot-Api-Secret-Token') || '', config.telegramWebhookSecret)) {
       return sendError(response, 401, 'invalid_webhook_secret', 'Некорректный секрет webhook.');
     }
@@ -581,11 +605,18 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       }
     }
 
-    const outcome = await withTransaction(async (client) => {
-      const dedupe = await client.query('INSERT INTO telegram_updates (update_id) VALUES ($1::bigint) ON CONFLICT DO NOTHING RETURNING update_id', [updateId]);
-      if (!dedupe.rows[0]) return 'duplicate';
+    const databaseAvailable = Boolean(pool && config.databaseConfigured);
+    const channelMessage = update.channel_post || update.edited_channel_post;
+    if (channelMessage && (!databaseAvailable || !config.channelConfigured)) {
+      return sendError(response, 503, 'configuration_required', 'Для приема публикаций из канала необходимо настроить базу данных и Telegram-канал.');
+    }
 
-      const channelMessage = update.channel_post || update.edited_channel_post;
+    const processUpdate = async (client) => {
+      if (client) {
+        const dedupe = await client.query('INSERT INTO telegram_updates (update_id) VALUES ($1::bigint) ON CONFLICT DO NOTHING RETURNING update_id', [updateId]);
+        if (!dedupe.rows[0]) return 'duplicate';
+      }
+
       if (channelMessage) {
         if (String(channelMessage.chat.id) !== config.telegramChannelId) return 'ignored';
         const film = parseChannelFilm(channelMessage, updateId);
@@ -603,7 +634,8 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         return 'callback_query';
       }
       return 'ignored';
-    });
+    };
+    const outcome = databaseAvailable ? await withTransaction(processUpdate) : await processUpdate(null);
     response.status(200).json({ ok: true, status: outcome });
   }));
 

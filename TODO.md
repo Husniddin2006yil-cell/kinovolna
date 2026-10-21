@@ -47,6 +47,22 @@
 - [x] Проверить сборку, API и ошибки автоматическими тестами и локальной PostgreSQL; отправить изменения в существующий GitHub с сохранением истории, без force push.
 - [ ] Реально подключить пользовательского Telegram-бота/канал и production-БД после получения username, channel ID, admin ID, защищённого bot token и данных хостинга; отдельно перечислить работающие функции и оставшуюся настройку.
 
+## Telegram bot — joriy vazifa
+
+- [x] Avvaldan mavjud GitHub repozitoriyasini tekshirish va Telegram bot kodi qayerdaligini topish; yangi loyiha yaratmaslik va Mini App’ni buzmaslik.
+- [x] `/start` rus tilida aynan shuni yuboradi: «Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?» Haqiqiy production `MINI_APP_URL` bo‘lsa, «🎬 Открыть КИНОВОЛНУ» inline tugmasi shu URL’ni ochadi; URL yo‘q bo‘lsa soxta link ko‘rsatmay sababini aytadi. Ikkala holat testlangan; production URL va live token hali berilmagan.
+- [x] `/help` qisqa yo‘riqnoma beradi; noma’lum komandaga tushunarli javob qaytaradi; `/id` murojaat qilgan foydalanuvchining Telegram numeric ID’sini ko‘rsatadi.
+- [x] Alohida `/admin` menyusiga faqat serverdagi `TELEGRAM_ADMIN_IDS` muhit o‘zgaruvchisida ko‘rsatilgan Telegram ID’lar kira oladi. Oddiy foydalanuvchi admin menyusi yoki uning callback amallariga ruxsat olmaydi; ruxsat har bir callback’da qayta tekshiriladi.
+- [x] Admin menyusida katalog, statistika va integratsiya holatini tekshiradigan tugma va handlerlar bor. Katalog/baza sozlanmagan bo‘lsa bu holat ochiq aytiladi; real hisoblangan katalog sonidan tashqari ko‘rish, qidirish yoki tinglash bo‘yicha soxta raqamlar berilmaydi.
+- [ ] Bot token faqat server konfiguratsiyasidan tekshirilsin; token chat, log, source code yoki GitHub’ga chiqarilmasin. Hozirgi muhit va lokal `.env` faylida token yo‘q, saqlangan secret ham topilmadi; shu sababli Bot API’ga live so‘rov yuborilmadi.
+- [x] `pnpm bot:start` mavjud webhook-serverining aliasi bo‘lib, `getUpdates`/long polling’ni boshlamaydi; lokal `/api/health` tekshiruvi muvaffaqiyatli. Server uchun Docker sozlamasi va ishga tushirish yo‘riqnomasi mavjud.
+- [ ] Production host uchun `PUBLIC_BASE_URL`, haqiqiy `MINI_APP_URL` va `TELEGRAM_WEBHOOK_SECRET` sozlanib, Telegram webhook/menu ulanishi bajarilishi kerak. Foydalanuvchi ruxsatisiz ommaga chiqarish yoki serverga deploy qilish mumkin emas.
+- [x] O‘zgarishlar tekshirildi va aynan mavjud private GitHub repozitoriyasiga yangi commit sifatida `task/kinovolna-webhook` branch’iga yuborildi; `main` tarixi force-push bilan o‘zgartirilmadi.
+
+### Joriy bot tekshiruvi
+
+`pnpm test`: 23/23 unit/security/bot regression test o‘tdi; `pnpm typecheck`, `pnpm build`, `pnpm bot:check` va `pnpm telegram:check`-ning secretsiz fail-closed holati tekshirildi. `pnpm bot:start` lokal health smoke tekshiruvi ham o‘tdi. Kod private GitHub’dagi `task/kinovolna-webhook` branch’iga yuborildi; `main` o‘zgarmadi. Live Telegram token/production URL va remote hosting sozlanmagan; hech qanday publish/deploy qilinmadi.
+
 ### Ikkinchi bosqichning tekshirilgan chegarasi
 
 Yuqoridagi amalga oshirilgan kod lokal PostgreSQL va ataylab belgilangan Telegram test double bilan tekshirildi: `pnpm build`, `pnpm typecheck`, 14 unit/security test va 12 integratsion test muvaffaqiyatli. HTTP orqali production rejimida frontend, `/api/health`, `/api/ready`, maxfiy sozlanmagan API xatolari tekshirildi. Secret scan va `pnpm audit --prod` toza. Mavjud fayllar o‘chirilmagan.

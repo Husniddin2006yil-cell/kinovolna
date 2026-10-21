@@ -1,1 +1,1 @@
-{"routes":[{"path":"/","title":"КИНОВОЛНА — кино и музыка"}]}
+{"routes":[{"path":"/","title":"КИНОВОЛНА — кино и музыка"},{"path":"/movies","title":"Фильмы и сериалы"},{"path":"/search","title":"Поиск по каталогу"},{"path":"/film/:id","title":"Страница фильма"},{"path":"/music","title":"Музыка"},{"path":"/profile","title":"Профиль"}]}

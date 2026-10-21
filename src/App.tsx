@@ -33,6 +33,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films, generatedArt, tracks, type Film as FilmItem, type Track } from './data';
+import { openFilmInTelegram, requestFilmPlayback } from './telegram';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
 type Notice = { title: string; body: string; label?: string };
@@ -246,6 +247,25 @@ function App() {
   }, [isSplashLeaving]);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('kinovolna:favorites');
+      const savedHistory = window.localStorage.getItem('kinovolna:history');
+      if (saved) setFavorites(JSON.parse(saved) as string[]);
+      if (savedHistory) setHistory(JSON.parse(savedHistory) as string[]);
+    } catch {
+      // Local storage is optional in Telegram's embedded browser.
+    }
+  }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('kinovolna:favorites', JSON.stringify(favorites)); } catch { /* optional */ }
+  }, [favorites]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('kinovolna:history', JSON.stringify(history)); } catch { /* optional */ }
+  }, [history]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes((event.target as HTMLElement)?.tagName ?? '')) {
         event.preventDefault();
@@ -309,6 +329,16 @@ function App() {
   };
 
   const openUnavailable = (title: string, body: string, label = 'Интеграция не подключена') => setNotice({ title, body, label });
+
+  const handleTelegramAction = (film: FilmItem) => {
+    const result = openFilmInTelegram(film.id);
+    if (!result.ok) openUnavailable('Telegram-бот пока не подключён', 'Кнопка уже подготовлена для deep link вида startapp=film_<id>. Добавьте VITE_TELEGRAM_BOT_USERNAME и подключите Bot API на backend.', 'Нужна настройка Telegram');
+  };
+
+  const handleWatchAction = async (film: FilmItem) => {
+    const result = await requestFilmPlayback(film.id);
+    if (!result.ok) openUnavailable(result.reason === 'failed' ? 'Не удалось открыть просмотр' : 'Источник онлайн-видео не подключён', result.reason === 'failed' ? 'Backend не вернул рабочую ссылку на видео. Проверьте endpoint /api/films/:id/playback.' : 'Кнопка готова к backend endpoint /api/films/:id/playback. Пока разрешённый видеопоток не настроен, фиктивная ссылка не открывается.', result.reason === 'failed' ? 'Ошибка backend' : 'Нужно подключить видеосервис');
+  };
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -495,8 +525,8 @@ function App() {
           <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year}<i />{film.duration}<i />{film.genre}</div>
           <p>{film.description}</p>
           <div className="detail-actions">
-            <button className="button button-primary" onClick={() => openUnavailable('Telegram-бот пока не подключён', 'Эта кнопка будет отправлять пользователю публикацию канала через Telegram Bot API. Понадобятся токен бота, ID канала и право бота получать публикации.', 'Нужно подключить Telegram')}><ArrowRight size={16} /> Получить в Telegram</button>
-            <button className="button button-glass" onClick={() => openUnavailable('Источник онлайн-видео не подключён', 'Публикация с видео в Telegram сама по себе не даёт публичную ссылку для HTML5-плеера. Онлайн-просмотр не включаем, пока нет разрешённого потока или отдельного видеохостинга.', 'Без фиктивных ссылок')}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
+            <button className="button button-primary" onClick={() => handleTelegramAction(film)}><ArrowRight size={16} /> Получить в Telegram</button>
+            <button className="button button-glass" onClick={() => void handleWatchAction(film)}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
           <div className="rights-note"><Info size={14} /> Используются только источники, которые разрешено распространять.</div>

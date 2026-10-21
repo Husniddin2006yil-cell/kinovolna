@@ -37,6 +37,7 @@ Yopiq kanalning eski tarixini Bot API avtomatik bera olmaydi. Admin import API m
 - `src/App.tsx` — страницы, поиск, избранное, карточки и честные статусы пока не подключённых сервисов.
 - `src/data.ts` — демонстрационный каталог; позже его заменит серверная база данных.
 - `src/styles.css` — адаптивный тёмный интерфейс.
+- `bot/index.mjs` — Telegram-бот: `/start`, `/help`, `/id`, неизвестные команды и защищённое меню администратора.
 - `public/manus-routes.json` — список страниц для Preview.
 - `public/favicon.svg` — знак КИНОВОЛНА.
 - `.env.example` — названия настроек будущего backend без секретных значений.
@@ -51,6 +52,21 @@ Yopiq kanalning eski tarixini Bot API avtomatik bera olmaydi. Admin import API m
 - **Музыка:** собственные/лицензированные аудиофайлы либо разрешённый потоковый источник. Для распознавания позже выберем настоящий сервис и отдельно настроим его API-ключ.
 
 Не нужно передавать пароль Telegram. Bot token и API-ключи не помещаются в исходный код или GitHub. Telegram Mini App должна проверять подпись `initData` на сервере. Если будет использоваться аудио/видео, все добавляемые источники должны быть разрешены для распространения.
+
+## Telegram-бот
+
+Бот запускается отдельным долгоживущим Node-процессом через `pnpm bot:start`. Он использует long polling, поэтому отдельный webhook/backend для команд не нужен, но для production нужен постоянно работающий хостинг и server-only переменные окружения:
+
+```text
+TELEGRAM_BOT_TOKEN=          # только server secret, не коммитить
+MINI_APP_URL=                # настоящий HTTPS production URL опубликованной Mini App
+TELEGRAM_ADMIN_IDS=          # один или несколько Telegram ID через запятую
+API_BASE_URL=                # необязательно; backend каталога, статистики и health
+```
+
+Бот намеренно не использует placeholder URL и не стартует без токена или настоящего `MINI_APP_URL`. `/admin` и его callback-кнопки повторно проверяют Telegram ID администратора. Каталог, статистика и health показываются только при фактическом ответе backend; фиктивные цифры не генерируются.
+
+Проверка без запуска Telegram API: `pnpm bot:check` и `pnpm build`. Реальный `/start`, токен и открытие Mini App можно проверить только после добавления server-only переменных на выбранный хостинг.
 
 ## Заставка и изображения
 

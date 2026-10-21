@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "start": "node server/index.mjs",
     "preview": "vite preview --host 0.0.0.0",
+    "bot:start": "node bot/index.mjs",
+    "bot:check": "node --check bot/index.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "telegram:check": "node scripts/telegram-setup.mjs check",
     "telegram:webhook": "node scripts/telegram-setup.mjs webhook",

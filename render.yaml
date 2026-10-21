@@ -1,0 +1,54 @@
+# Render Blueprint: one HTTPS service serves the Vite SPA, API and Telegram webhook.
+# Secret values use sync:false and must be entered in the Render Dashboard.
+services:
+  - type: web
+    name: kinovolna
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    preDeployCommand: node scripts/migrate.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kinovolna-db
+          property: connectionString
+      - key: APP_ORIGIN
+        fromService:
+          name: kinovolna
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: PUBLIC_BASE_URL
+        fromService:
+          name: kinovolna
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: MINI_APP_URL
+        fromService:
+          name: kinovolna
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_ADMIN_IDS
+        sync: false
+      - key: TELEGRAM_CHANNEL_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: TELEGRAM_CHANNEL_INVITE_URL
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+
+databases:
+  - name: kinovolna-db
+    databaseName: kinovolna
+    user: kinovolna
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList: []

@@ -67,6 +67,14 @@ TELEGRAM_ADMIN_IDS=          # один или несколько Telegram ID ч
 
 Проверки кода без live-токена: `pnpm bot:check`, `pnpm typecheck`, `pnpm build` и `pnpm test`. После добавления токена `pnpm telegram:check` безопасно проверяет `getMe` даже до настройки канала и username; он не печатает токен. После размещения сервера задайте `PUBLIC_BASE_URL` и `TELEGRAM_WEBHOOK_SECRET`, затем осознанно выполните `pnpm telegram:webhook`. `pnpm telegram:menu` устанавливает Telegram menu button и требует настоящий `MINI_APP_URL`. Эти команды меняют внешнюю конфигурацию Telegram и сейчас не запускались.
 
+## Deployment
+
+Для текущей архитектуры frontend, Express API, Telegram webhook и PostgreSQL лучше размещать одним Render Blueprint: сервис имеет один HTTPS URL, поэтому `MINI_APP_URL` и `PUBLIC_BASE_URL` могут указывать на тот же адрес, а frontend не требует отдельного CORS-прокси. Готовый файл `render.yaml` создаёт web service и PostgreSQL, запускает миграции перед deploy и включает автоматический deploy при push в `main`.
+
+В Render Blueprint секреты с `sync: false` вводятся только в Dashboard: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_CHANNEL_ID`, `TELEGRAM_CHANNEL_INVITE_URL` и `TMDB_API_KEY`. `TELEGRAM_WEBHOOK_SECRET` генерируется Render. После первого deploy нужно добавить бота администратором канала, выполнить `pnpm telegram:check`, а затем на production-сервисе выполнить `pnpm telegram:webhook` и `pnpm telegram:menu`.
+
+Vercel подходит для отдельного статического Vite frontend и автоматически создаёт deployment на push в GitHub, но для этого проекта он не заменяет постоянный Express webhook и PostgreSQL. Поэтому Vercel не используется как единственный production-host: Render Blueprint сохраняет frontend и backend на одном HTTPS origin.
+
 ## Заставка и изображения
 
 При каждом новом запуске страницы показывается короткая кинематографичная заставка КИНОВОЛНА: затемнённый фон, бирюзово-синие световые лучи, анимированный знак и надпись «МИР КИНО И МУЗЫКИ». Она длится около 2,3 секунды, её можно пропустить; при системной настройке `prefers-reduced-motion` анимация сокращается. После заставки открывается рабочий демонстрационный каталог с горизонтальными лентами «Сейчас смотрят», «Популярное», «Новинки кино» и «Сериалы». Текущие названия фильмов демонстрационные и не имеют подтверждённых интернет-постеров. Когда появятся реальные названия и годы, для каждого фильма отдельно найдём совпадающий постер через разрешённый каталог изображений в наибольшем подходящем разрешении. Чужой или случайный постер не подставляем. Если вы пришлёте собственные картинки, их тоже можно использовать.

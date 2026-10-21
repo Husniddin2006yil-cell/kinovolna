@@ -56,13 +56,12 @@
 - [x] Admin menyusida katalog, statistika va integratsiya holatini tekshiradigan tugma va handlerlar bor. Katalog/baza sozlanmagan bo‘lsa bu holat ochiq aytiladi; real hisoblangan katalog sonidan tashqari ko‘rish, qidirish yoki tinglash bo‘yicha soxta raqamlar berilmaydi.
 - [ ] Bot token faqat server konfiguratsiyasidan tekshirilsin; token chat, log, source code yoki GitHub’ga chiqarilmasin. Hozirgi muhit va lokal `.env` faylida token yo‘q, saqlangan secret ham topilmadi; shu sababli Bot API’ga live so‘rov yuborilmadi.
 - [x] `pnpm bot:start` mavjud webhook-serverining aliasi bo‘lib, `getUpdates`/long polling’ni boshlamaydi; lokal `/api/health` tekshiruvi muvaffaqiyatli. Server uchun Docker sozlamasi va ishga tushirish yo‘riqnomasi mavjud.
-- [ ] Production хостын `PUBLIC_BASE_URL`, бодит `MINI_APP_URL`, `TELEGRAM_WEBHOOK_SECRET` тохируулах, Telegram webhook/menu-г бодитоор холбох шаардлагатай; хэрэглэгчийн зөвшөөрөлгүй public publish/deploy хийхгүй.
 - [ ] Production host uchun `PUBLIC_BASE_URL`, haqiqiy `MINI_APP_URL` va `TELEGRAM_WEBHOOK_SECRET` sozlanib, Telegram webhook/menu ulanishi bajarilishi kerak. Foydalanuvchi ruxsatisiz ommaga chiqarish yoki serverga deploy qilish mumkin emas.
-- [ ] O‘zgarishlar tekshirilsin, xatolar tuzatilsin va aynan mavjud GitHub repozitoriyasiga yangi commit sifatida yuborilsin; mavjud tarixni force-push bilan almashtirmaslik kerak.
+- [x] O‘zgarishlar tekshirildi va aynan mavjud private GitHub repozitoriyasiga yangi commit sifatida `task/kinovolna-webhook` branch’iga yuborildi; `main` tarixi force-push bilan o‘zgartirilmadi.
 
 ### Joriy bot tekshiruvi
 
-`pnpm test`: 23/23 unit/security/bot regression test o‘tdi; `pnpm typecheck`, `pnpm build`, `pnpm bot:check` va `pnpm telegram:check`-ning secretsiz fail-closed holati tekshirildi. `pnpm bot:start` lokal health smoke tekshiruvi ham o‘tdi. Live Telegram token/production URL va remote hosting sozlanmagan; hech qanday publish/deploy qilinmadi.
+`pnpm test`: 23/23 unit/security/bot regression test o‘tdi; `pnpm typecheck`, `pnpm build`, `pnpm bot:check` va `pnpm telegram:check`-ning secretsiz fail-closed holati tekshirildi. `pnpm bot:start` lokal health smoke tekshiruvi ham o‘tdi. Kod private GitHub’dagi `task/kinovolna-webhook` branch’iga yuborildi; `main` o‘zgarmadi. Live Telegram token/production URL va remote hosting sozlanmagan; hech qanday publish/deploy qilinmadi.
 
 ### Ikkinchi bosqichning tekshirilgan chegarasi
 

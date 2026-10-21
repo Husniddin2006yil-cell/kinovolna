@@ -21,22 +21,29 @@ function isChannelAdministrator(member) {
 }
 
 async function check() {
-  if (!config.channelConfigured) throw new Error('Требуется числовой TELEGRAM_CHANNEL_ID, начинающийся с -100.');
-  if (!config.telegramBotUsername) throw new Error('Для проверки требуется корректный TELEGRAM_BOT_USERNAME.');
   const telegram = needTelegram();
-  const [me, channel, webhook] = await Promise.all([telegram.getMe(), telegram.getChat(config.telegramChannelId), telegram.getWebhookInfo()]);
-  if (!me?.id || !me?.username || me.username.toLowerCase() !== config.telegramBotUsername.toLowerCase()) {
+  const [me, webhook] = await Promise.all([telegram.getMe(), telegram.getWebhookInfo()]);
+  if (!me?.id || !me?.username) throw new Error('Telegram Bot API не вернул данные настроенного бота.');
+  if (config.telegramBotUsername && me.username.toLowerCase() !== config.telegramBotUsername.toLowerCase()) {
     throw new Error('TELEGRAM_BOT_USERNAME не соответствует боту из настроенного токена.');
   }
-  if (channel?.type !== 'channel') throw new Error('TELEGRAM_CHANNEL_ID должен указывать на Telegram-канал.');
-  const membership = await telegram.getChatMember(config.telegramChannelId, me.id);
-  if (!isChannelAdministrator(membership)) throw new Error('Бот должен быть администратором TELEGRAM_CHANNEL_ID.');
+  let channel = null;
+  let membership = null;
+  if (config.channelConfigured) {
+    channel = await telegram.getChat(config.telegramChannelId);
+    if (channel?.type !== 'channel') throw new Error('TELEGRAM_CHANNEL_ID должен указывать на Telegram-канал.');
+    membership = await telegram.getChatMember(config.telegramChannelId, me.id);
+    if (!isChannelAdministrator(membership)) throw new Error('Бот должен быть администратором TELEGRAM_CHANNEL_ID.');
+  }
   console.log(JSON.stringify({
-    status: 'ok',
+    status: config.channelConfigured ? 'ok' : 'bot_api_ok',
     bot: { id: me.id, username: me.username },
-    channel: { id: config.telegramChannelId, type: channel?.type ?? 'unknown', title: channel?.title ?? null },
-    botMembership: membership.status,
+    channel: config.channelConfigured
+      ? { configured: true, id: config.telegramChannelId, type: channel?.type ?? 'unknown', title: channel?.title ?? null }
+      : { configured: false },
+    botMembership: membership?.status ?? 'not_checked',
     adminIdsConfigured: config.telegramAdminIds.size,
+    miniAppUrlConfigured: Boolean(config.miniAppUrl),
     webhook: {
       configured: Boolean(webhook?.url),
       pendingUpdateCount: Number.isSafeInteger(webhook?.pending_update_count) ? webhook.pending_update_count : 0,

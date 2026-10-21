@@ -111,13 +111,13 @@ curl -i http://127.0.0.1:3001/api/ready
 ## Telegram xavfsiz sozlamasi
 
 1. Botni maqsad kanaliga **administrator** qilib qo‘shing. [getChatMember](https://core.telegram.org/bots/api/methods/getchatmember.md) boshqa foydalanuvchilar uchun bu tekshiruv bot admin bo‘lganda kafolatlanishini aytadi.
-2. Token, username, `-100...` kanal ID, admin ID va HTTPS URLlarni `.env`ga kiriting; so‘ng avval faqat tekshiring:
+2. Bot API tokenini tekshirish uchun `TELEGRAM_BOT_TOKEN` kiriting. `TELEGRAM_BOT_USERNAME` — faqat token bilan mosligini solishtirish uchun ixtiyoriy; kanalni tekshirish uchun `-100...` `TELEGRAM_CHANNEL_ID` va botni kanalga administrator qilib qo‘shish kerak. Webhook/admin menyusi uchun mos secretlar va HTTPS URLlarni server muhitiga kiriting; so‘ng avval faqat tekshiring:
 
    ```bash
    pnpm telegram:check
    ```
 
-   U `getMe`, kanal, bot a’zoligi va joriy webhookni tekshiradi.
+   Token mavjud bo‘lsa, `getMe` va joriy webhook holati tekshiriladi. `TELEGRAM_CHANNEL_ID` sozlangan bo‘lsa, kanal turi va botning administrator huquqi ham tekshiriladi; token bo‘lmasa Telegram API’ga so‘rov yuborilmaydi.
 3. Production endpoint tayyor bo‘lgach webhook va menyuni alohida o‘rnating:
 
    ```bash

@@ -10,7 +10,7 @@ To‘liq sozlash, Windows/Linux, Docker Compose va eski postlarni import qilish:
 
 Qisqa lokal yo‘l: `pnpm install --frozen-lockfile`, `.env.example`dan `.env` nusxasi, PostgreSQL uchun `DATABASE_URL`ni to‘ldirish, `pnpm db:migrate`, so‘ng `pnpm dev`. Frontend `http://localhost:3000`, API `http://localhost:3001`. `pnpm dev:web` faqat frontend, `pnpm dev:server` faqat API. `pnpm preview` faqat buildni ko‘rsatadi — backend emas. Production uchun `pnpm build`, keyin `NODE_ENV=production pnpm start`; Windows PowerShell: `$env:NODE_ENV='production'; pnpm start`.
 
-Bot uchun `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_CHANNEL_ID`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_WEBHOOK_SECRET` kerak. Token va baza paroli faqat server `.env` yoki hosting secretsda bo‘lsin; **hech qachon `VITE_*`da emas**. Botingiz kanal administratori bo‘lishi kerak. `pnpm telegram:check` mavjud botga faqat tekshiruv so‘rovlari qiladi. HTTPS server tayyor bo‘lgach, `pnpm telegram:webhook` va `pnpm telegram:menu` qo‘lda bajariladi; mavjud webhook avtomatik almashtirilmaydi.
+Bot uchun server muhitida `TELEGRAM_BOT_TOKEN`, webhook ulashda esa `TELEGRAM_WEBHOOK_SECRET` kerak. `MINI_APP_URL` haqiqiy ommaviy HTTPS manzil bo‘lishi shart. `TELEGRAM_ADMIN_IDS` admin Telegram ID’lari; `TELEGRAM_CHANNEL_ID` va PostgreSQL katalog indekslash/sonlarni hisoblash uchun kerak. `TELEGRAM_BOT_USERNAME` `pnpm telegram:check`da solishtirish uchun ixtiyoriy. Token va baza paroli faqat server `.env` yoki hosting secrets’da saqlanadi; **hech qachon `VITE_*`ga yozilmaydi**. Bot kanal administratori bo‘lishi kerak. `pnpm telegram:check` token bo‘lsa avval `getMe` orqali botni tekshiradi; kanal ID sozlangan bo‘lsa kanal va admin huquqini ham tekshiradi. HTTPS server tayyor bo‘lgach, webhook va menu alohida qo‘lda o‘rnatiladi; mavjud webhook avtomatik almashtirilmaydi.
 
 Tekshiruvlar: `pnpm typecheck`, `pnpm build`, `pnpm test`. Alohida sinov PostgreSQL bazasi bilan `TEST_DATABASE_URL=… pnpm test:integration`. Sinovlar haqiqiy PostgreSQLdan foydalanadi, Telegram tarmog‘i esa aniq belgilangan test double bilan tekshiriladi. Bu foydalanuvchining haqiqiy boti allaqachon ulanganini anglatmaydi.
 
@@ -55,18 +55,17 @@ Yopiq kanalning eski tarixini Bot API avtomatik bera olmaydi. Admin import API m
 
 ## Telegram-бот
 
-Бот работает через существующий защищённый webhook backend (`pnpm start`), поэтому его нельзя запускать одновременно с `getUpdates`/long polling для того же токена. Для production нужен постоянно работающий HTTPS-хостинг и server-only переменные окружения:
+Команды бота принимает существующий защищённый webhook backend (`pnpm start`). `pnpm bot:start` — совместимый alias того же сервера; запускайте только один процесс. Отдельный `getUpdates`/long polling для этого токена не используется. Сервер может стартовать до подключения базы, но для Telegram webhook нужны постоянный HTTPS-хостинг и server-only переменные окружения:
 
 ```text
 TELEGRAM_BOT_TOKEN=          # только server secret, не коммитить
 MINI_APP_URL=                # настоящий HTTPS production URL опубликованной Mini App
 TELEGRAM_ADMIN_IDS=          # один или несколько Telegram ID через запятую
-API_BASE_URL=                # необязательно; backend каталога, статистики и health
 ```
 
-Бот намеренно не использует placeholder URL и не стартует без токена или настоящего `MINI_APP_URL`. `/admin` и его callback-кнопки повторно проверяют Telegram ID администратора. Каталог, статистика и health показываются только при фактическом ответе backend; фиктивные цифры не генерируются.
+`/start`, `/help`, `/id` и защищённое меню `/admin` обрабатываются webhook-телом и не требуют PostgreSQL. Кнопка Mini App в `/start` появляется только при настоящем публичном HTTPS `MINI_APP_URL`; иначе бот честно объясняет, что URL пока не настроен. `/admin` и каждый callback повторно проверяют Telegram ID администратора. Каталог и статистика требуют PostgreSQL и `TELEGRAM_CHANNEL_ID`; показывается только реальный размер каталога, а просмотры/поиски/прослушивания не выдумываются. Проверка интеграций обращается к Bot API и проверяет права бота в канале, если настроен channel ID.
 
-Проверка без запуска Telegram API: `pnpm bot:check`, `pnpm typecheck`, `pnpm build` и `pnpm test`. После публикации backend выполните `pnpm telegram:check`, затем `pnpm telegram:webhook` и `pnpm telegram:menu`. Реальный `/start`, токен и открытие Mini App можно проверить только после добавления server-only переменных на выбранный хостинг.
+Проверки кода без live-токена: `pnpm bot:check`, `pnpm typecheck`, `pnpm build` и `pnpm test`. После добавления токена `pnpm telegram:check` безопасно проверяет `getMe` даже до настройки канала и username; он не печатает токен. После размещения сервера задайте `PUBLIC_BASE_URL` и `TELEGRAM_WEBHOOK_SECRET`, затем осознанно выполните `pnpm telegram:webhook`. `pnpm telegram:menu` устанавливает Telegram menu button и требует настоящий `MINI_APP_URL`. Эти команды меняют внешнюю конфигурацию Telegram и сейчас не запускались.
 
 ## Заставка и изображения
 

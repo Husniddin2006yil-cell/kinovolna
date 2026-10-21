@@ -59,7 +59,7 @@ async function webhook() {
   await telegram.setWebhook({
     url: target,
     secret_token: config.telegramWebhookSecret,
-    allowed_updates: ['channel_post', 'edited_channel_post', 'message'],
+    allowed_updates: ['channel_post', 'edited_channel_post', 'message', 'callback_query'],
     drop_pending_updates: false,
   });
   console.log(JSON.stringify({ status: 'webhook_set', replacedExistingWebhook: Boolean(current?.url && current.url !== target) }));

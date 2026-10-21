@@ -13,6 +13,7 @@ const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const SAFE_TEXT_MAX = 10_000;
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807n;
+const BOT_WELCOME = 'Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?';
 
 class RequestError extends Error {
   constructor(status, code, message) {
@@ -370,15 +371,39 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
 
   async function processStartMessage(client, message) {
     if (message.chat?.type !== 'private' || !message.from || String(message.from.id) !== String(message.chat.id) || typeof message.text !== 'string') return;
-    const command = message.text.trim().match(/^\/start(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/);
+    const command = message.text.trim().match(/^\/([A-Za-z0-9_]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/);
     if (!command) return;
-    const payload = command[1]?.trim();
+    const name = command[1].toLowerCase();
+    const payload = command[2]?.trim();
+    if (name === 'help') {
+      await telegramClient.sendMessage(message.chat.id, 'Команды КИНОВОЛНА:\n/start — открыть КИНОВОЛНУ\n/help — краткая инструкция\n/id — показать ваш Telegram ID\n/admin — меню администратора (только для администратора).');
+      return;
+    }
+    if (name === 'id') {
+      await telegramClient.sendMessage(message.chat.id, `Ваш Telegram ID: ${message.from.id}`);
+      return;
+    }
+    if (name === 'admin') {
+      if (!config.telegramAdminIds.has(String(message.from.id))) {
+        await telegramClient.sendMessage(message.chat.id, 'У вас нет доступа к меню администратора.');
+        return;
+      }
+      await telegramClient.sendMessage(message.chat.id, 'Панель администратора КИНОВОЛНА\n\nВыберите действие:', { reply_markup: { inline_keyboard: [
+        [{ text: '🎞 Управление каталогом', callback_data: 'admin_catalog' }],
+        [{ text: '📊 Статистика', callback_data: 'admin_stats' }, { text: '🔌 Состояние интеграций', callback_data: 'admin_health' }],
+      ] } });
+      return;
+    }
+    if (name !== 'start') {
+      await telegramClient.sendMessage(message.chat.id, 'Неизвестная команда. Используйте /help для списка доступных команд.');
+      return;
+    }
     if (!payload) {
       if (config.miniAppUrl) {
-        await telegramClient.sendMessage(message.chat.id, 'Откройте приложение для каталога.', {
-          reply_markup: { inline_keyboard: [[{ text: 'Открыть Mini App', web_app: { url: config.miniAppUrl } }]] },
+        await telegramClient.sendMessage(message.chat.id, BOT_WELCOME, {
+          reply_markup: { inline_keyboard: [[{ text: '🎬 Открыть КИНОВОЛНУ', web_app: { url: config.miniAppUrl } }]] },
         });
-      }
+      } else await telegramClient.sendMessage(message.chat.id, `${BOT_WELCOME}\n\nMini App пока не опубликован: добавьте настоящий production URL в MINI_APP_URL.`);
       return;
     }
     const match = payload.match(/^film_([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
@@ -406,6 +431,40 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const url = publicChannelUrl(row);
     if (!url) throw new RequestError(500, 'link_unavailable', 'Ссылка на фильм недоступна.');
     await telegramClient.sendMessage(message.chat.id, `Откройте публикацию: ${url}`);
+  }
+
+  async function processAdminCallback(client, callback) {
+    const userId = callback?.from?.id;
+    const chatId = callback?.message?.chat?.id;
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !chatId || callback?.message?.chat?.type !== 'private') return;
+    await telegramClient.call('answerCallbackQuery', { callback_query_id: callback.id });
+    if (!config.telegramAdminIds.has(String(userId))) {
+      await telegramClient.sendMessage(chatId, 'У вас нет доступа к меню администратора.');
+      return;
+    }
+    if (callback.data === 'admin_catalog') {
+      if (!pool || !config.databaseConfigured || !config.channelConfigured) {
+        await telegramClient.sendMessage(chatId, 'Управление каталогом недоступно: база данных или Telegram-канал ещё не настроены. Реальный каталог не изменён.');
+        return;
+      }
+      const result = await client.query('SELECT COUNT(*)::bigint AS total FROM films WHERE channel_id = $1::bigint', [config.telegramChannelId]);
+      await telegramClient.sendMessage(chatId, `Каталог подключён: ${result.rows[0].total} записей.\nИзменение записей выполняется через защищённый admin API Mini App; фиктивные операции не выполняются.`);
+      return;
+    }
+    if (callback.data === 'admin_stats') {
+      if (!pool || !config.databaseConfigured || !config.channelConfigured) {
+        await telegramClient.sendMessage(chatId, 'Статистика недоступна: база данных или Telegram-канал ещё не настроены. Фиктивные цифры не показываются.');
+        return;
+      }
+      const result = await client.query('SELECT COUNT(*)::bigint AS films FROM films WHERE channel_id = $1::bigint', [config.telegramChannelId]);
+      await telegramClient.sendMessage(chatId, `Статистика каталога:\nФильмов и сериалов в базе: ${result.rows[0].films}`);
+      return;
+    }
+    if (callback.data === 'admin_health') {
+      const backend = pool && config.databaseConfigured ? 'база данных: настроена' : 'база данных: не настроена';
+      const channel = config.channelConfigured ? 'канал: настроен' : 'канал: не настроен';
+      await telegramClient.sendMessage(chatId, `Состояние интеграций:\nTelegram Bot API: отвечает\n${backend}\n${channel}\nMini App URL: ${config.miniAppUrl ? 'настроен' : 'не настроен'}`);
+    }
   }
 
   app.get('/api/health', (_request, response) => response.status(200).json({ status: 'ok' }));
@@ -538,6 +597,10 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       if (update.message) {
         await processStartMessage(client, update.message);
         return 'message';
+      }
+      if (update.callback_query) {
+        await processAdminCallback(client, update.callback_query);
+        return 'callback_query';
       }
       return 'ignored';
     });

@@ -55,7 +55,7 @@ Yopiq kanalning eski tarixini Bot API avtomatik bera olmaydi. Admin import API m
 
 ## Telegram-бот
 
-Бот запускается отдельным долгоживущим Node-процессом через `pnpm bot:start`. Он использует long polling, поэтому отдельный webhook/backend для команд не нужен, но для production нужен постоянно работающий хостинг и server-only переменные окружения:
+Бот работает через существующий защищённый webhook backend (`pnpm start`), поэтому его нельзя запускать одновременно с `getUpdates`/long polling для того же токена. Для production нужен постоянно работающий HTTPS-хостинг и server-only переменные окружения:
 
 ```text
 TELEGRAM_BOT_TOKEN=          # только server secret, не коммитить
@@ -66,7 +66,7 @@ API_BASE_URL=                # необязательно; backend катало�
 
 Бот намеренно не использует placeholder URL и не стартует без токена или настоящего `MINI_APP_URL`. `/admin` и его callback-кнопки повторно проверяют Telegram ID администратора. Каталог, статистика и health показываются только при фактическом ответе backend; фиктивные цифры не генерируются.
 
-Проверка без запуска Telegram API: `pnpm bot:check` и `pnpm build`. Реальный `/start`, токен и открытие Mini App можно проверить только после добавления server-only переменных на выбранный хостинг.
+Проверка без запуска Telegram API: `pnpm bot:check`, `pnpm typecheck`, `pnpm build` и `pnpm test`. После публикации backend выполните `pnpm telegram:check`, затем `pnpm telegram:webhook` и `pnpm telegram:menu`. Реальный `/start`, токен и открытие Mini App можно проверить только после добавления server-only переменных на выбранный хостинг.
 
 ## Заставка и изображения
 

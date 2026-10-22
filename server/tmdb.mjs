@@ -30,6 +30,7 @@ function normalizeItem(item, mediaType, genres) {
     description: typeof item.overview === 'string' ? item.overview.trim() : '',
     year: yearFrom(mediaType === 'tv' ? item.first_air_date : item.release_date),
     rating: Number.isFinite(Number(item.vote_average)) ? Math.max(0, Math.min(10, Number(item.vote_average))) : 0,
+    popularity: Number.isFinite(Number(item.popularity)) ? Math.max(0, Number(item.popularity)) : 0,
     genre: genreNames.join(' · ') || 'Не указан',
     poster: typeof item.poster_path === 'string' ? `${TMDB_IMAGE_ROOT}${item.poster_path}` : null,
     backdrop: typeof item.backdrop_path === 'string' ? `${TMDB_BACKDROP_ROOT}${item.backdrop_path}` : null,
@@ -57,22 +58,14 @@ export async function fetchTmdbWatchProviders(apiKey, mediaType, tmdbId) {
 
 export async function fetchTmdbCatalog(apiKey) {
   if (!apiKey) throw new Error('TMDB API key is not configured');
-  const [movieGenres, tvGenres, popularMovies, newMovies, popularSeries] = await Promise.all([
+  const [movieGenres, ...moviePages] = await Promise.all([
     tmdbGet('/genre/movie/list', apiKey),
-    tmdbGet('/genre/tv/list', apiKey),
-    tmdbGet('/movie/popular?page=1', apiKey),
-    tmdbGet('/movie/now_playing?page=1', apiKey),
-    tmdbGet('/tv/popular?page=1', apiKey),
+    ...Array.from({ length: 10 }, (_, index) => tmdbGet(`/discover/movie?sort_by=popularity.desc&page=${index + 1}`, apiKey)),
   ]);
   const movieGenreMap = new Map((movieGenres.genres ?? []).map((genre) => [Number(genre.id), String(genre.name)]));
-  const tvGenreMap = new Map((tvGenres.genres ?? []).map((genre) => [Number(genre.id), String(genre.name)]));
-  const all = [
-    ...(popularMovies.results ?? []).slice(0, 30).map((item) => normalizeItem(item, 'movie', movieGenreMap)),
-    ...(newMovies.results ?? []).slice(0, 30).map((item) => normalizeItem(item, 'movie', movieGenreMap)),
-    ...(popularSeries.results ?? []).slice(0, 30).map((item) => normalizeItem(item, 'tv', tvGenreMap)),
-  ];
-  const unique = new Map(all.filter((item) => Number.isSafeInteger(item.tmdbId) && item.tmdbId > 0 && item.title).map((item) => [`${item.mediaType}:${item.tmdbId}`, item]));
-  return [...unique.values()];
+  const all = moviePages.flatMap((page) => (page.results ?? []).map((item) => normalizeItem(item, 'movie', movieGenreMap)));
+  const unique = new Map(all.filter((item) => Number.isSafeInteger(item.tmdbId) && item.tmdbId > 0 && item.title && item.poster).map((item) => [`movie:${item.tmdbId}`, item]));
+  return [...unique.values()].sort((a, b) => b.popularity - a.popularity).slice(0, 200);
 }
 
 /** Resolve one channel title to a TMDB poster without accepting a weak match. */
@@ -107,13 +100,13 @@ export async function syncTmdbCatalog(pool, apiKey) {
     await client.query('BEGIN');
     for (const item of items) {
       await client.query(`
-        INSERT INTO tmdb_catalog (tmdb_id, media_type, title, original_title, description, year, rating, genre, poster, backdrop, source_url, synced_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+        INSERT INTO tmdb_catalog (tmdb_id, media_type, title, original_title, description, year, rating, popularity, genre, poster, backdrop, source_url, synced_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
         ON CONFLICT (tmdb_id, media_type) DO UPDATE SET
           title = EXCLUDED.title, original_title = EXCLUDED.original_title, description = EXCLUDED.description,
-          year = EXCLUDED.year, rating = EXCLUDED.rating, genre = EXCLUDED.genre, poster = EXCLUDED.poster,
+          year = EXCLUDED.year, rating = EXCLUDED.rating, popularity = EXCLUDED.popularity, genre = EXCLUDED.genre, poster = EXCLUDED.poster,
           backdrop = EXCLUDED.backdrop, source_url = EXCLUDED.source_url, synced_at = now()
-      `, [item.tmdbId, item.mediaType, item.title, item.originalTitle, item.description, item.year, item.rating.toFixed(1), item.genre, item.poster, item.backdrop, item.sourceUrl]);
+      `, [item.tmdbId, item.mediaType, item.title, item.originalTitle, item.description, item.year, item.rating.toFixed(1), item.popularity, item.genre, item.poster, item.backdrop, item.sourceUrl]);
     }
     await client.query('COMMIT');
     return items.length;

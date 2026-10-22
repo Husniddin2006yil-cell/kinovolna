@@ -101,6 +101,7 @@ export async function migrate(pool) {
         PRIMARY KEY (tmdb_id, media_type)
       )
     `);
+    await client.query('ALTER TABLE tmdb_catalog ADD COLUMN IF NOT EXISTS popularity numeric NOT NULL DEFAULT 0');
     await client.query('CREATE INDEX IF NOT EXISTS films_title_search_idx ON films USING gin (to_tsvector(\'simple\', title || \' \' || description))');
     await client.query('CREATE INDEX IF NOT EXISTS films_source_date_idx ON films (source_date DESC NULLS LAST, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_rating_idx ON tmdb_catalog (rating DESC, year DESC)');

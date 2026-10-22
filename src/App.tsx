@@ -304,7 +304,7 @@ function App() {
     setTelegramUser(null);
     try {
       const result = await loadTelegramCatalog();
-      setFilms(uniqueMovieTitles(result.films));
+      setFilms(uniqueMovieTitles(result.films).filter((film) => film.kind === 'Фильм'));
       setTelegramUser(result.user);
       setCatalogMode(result.mode);
       setCatalogMessage(result.mode === 'tmdb'
@@ -627,7 +627,6 @@ function App() {
     const filmsOnly = films.filter((film) => film.kind === 'Фильм');
     const sortedByRating = [...filmsOnly].sort((a, b) => Number(b.rating) - Number(a.rating));
     const latestFilms = [...filmsOnly].sort((a, b) => b.year - a.year);
-    const series = films.filter((film) => film.kind === 'Сериал');
 
     return (
       <>
@@ -646,6 +645,17 @@ function App() {
           </div>
           <div className="hero-caption"><span className="caption-line" /> Почувствуйте атмосферу кино</div>
         </section>
+        ) : catalogMode === 'tmdb' && films[0] ? (
+          <section className="hero-card channel-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(7,10,18,.98) 0%, rgba(7,10,18,.76) 35%, rgba(7,10,18,.16) 100%), url("${films[0].poster}")` }}>
+            <div className="hero-copy">
+              <Tag bright><Star size={13} fill="currentColor" /> Reytingi baland</Tag>
+              <h1>{films[0].title}</h1>
+              <p>{films[0].description || 'TMDB’dan tanlangan yuqori reytingli film.'}</p>
+              <div className="hero-details"><span><Star size={14} fill="currentColor" /> {films[0].rating}</span><i />{films[0].year || '—'}<i />{films[0].genre}</div>
+              <button className="button button-primary" onClick={() => openFilm(films[0])}>Подробнее <ArrowRight size={16} /></button>
+            </div>
+            <div className="hero-caption"><span className="caption-line" /> {films[0].badge ?? 'Кино из TMDB'}</div>
+          </section>
         ) : (
           <section className="hero-card channel-hero">
             <div className="hero-copy">
@@ -658,9 +668,9 @@ function App() {
         )}
 
         <section className="content-section home-rail-section rail-now">
-          <SectionHeading eyebrow={catalogMode === 'demo' ? 'Демо-подборка' : 'Публикации канала'} title={catalogMode === 'demo' ? 'Сейчас смотрят' : 'Фильмы из канала'} action="Весь каталог" onAction={() => goTo('movies')} />
+          <SectionHeading eyebrow={catalogMode === 'demo' ? 'Демо-подборка' : 'TMDB · 200 фильмов'} title={catalogMode === 'demo' ? 'Сейчас смотрят' : 'Фильмы'} action="Весь каталог" onAction={() => goTo('movies')} />
           {renderFilmRail(sortedByRating.slice(0, 5))}
-          <p className="home-demo-note">{catalogMode === 'demo' ? 'Демонстрационный каталог; реальные просмотры не учитываются.' : 'Это публикации канала, а не статистика просмотров. Онлайн-видеопоток не подключён.'}</p>
+          <p className="home-demo-note">{catalogMode === 'demo' ? 'Демонстрационный каталог; реальные просмотры не учитываются.' : 'Рейтинг и популярность предоставлены TMDB.'}</p>
         </section>
 
         <section className="content-section home-rail-section rail-popular">
@@ -673,11 +683,6 @@ function App() {
           {renderFilmRail(latestFilms.slice(0, 5))}
         </section>
 
-        <section className="content-section home-rail-section rail-series">
-          <SectionHeading eyebrow="Истории, к которым возвращаются" title="Сериалы" action="Все сериалы" onAction={() => goTo('movies')} />
-          {renderFilmRail(series)}
-        </section>
-
         <section className="music-feature">
           <div className="feature-orb orb-one" /><div className="feature-orb orb-two" />
           <div className="music-feature-copy"><Tag><AudioLines size={13} /> Аудионастроение</Tag><h2>Огни города</h2><p>Спокойные ритмы для полуночного настроения. Найдите свой саундтрек.</p><button className="button button-glass" onClick={() => goTo('music')}>К музыке <ArrowRight size={15} /></button></div>
@@ -688,8 +693,8 @@ function App() {
   };
   const renderMovies = (searchPage = false) => (
     <section className="page-section">
-      <div className="page-title-row"><div><div className="eyebrow">{searchPage ? 'Поиск и открытия' : 'Погрузитесь в мир кино'}</div><h1>{searchPage ? 'Что вы ищете?' : 'Фильмы и сериалы'}</h1><p>{searchPage ? 'Ищите по названию, жанру или описанию.' : 'Новые истории и знакомые эмоции.'}</p></div><div className="catalog-count"><span>{filteredFilms.length.toString().padStart(2, '0')}</span><small>историй</small></div></div>
-      <form className="large-search" onSubmit={submitSearch}><Search size={18} /><input className="main-search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название фильма, сериала или жанр..." aria-label="Найти фильм или сериал" /><kbd>/</kbd><button type="submit" aria-label="Искать"><ArrowRight size={18} /></button></form>
+      <div className="page-title-row"><div><div className="eyebrow">{searchPage ? 'Поиск и открытия' : 'Погрузитесь в мир кино'}</div><h1>{searchPage ? 'Что вы ищете?' : 'Фильмы'}</h1><p>{searchPage ? 'Ищите по названию, жанру или описанию.' : '200 фильмов с постерами TMDB.'}</p></div><div className="catalog-count"><span>{filteredFilms.length.toString().padStart(2, '0')}</span><small>фильмов</small></div></div>
+      <form className="large-search" onSubmit={submitSearch}><Search size={18} /><input className="main-search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название фильма или жанр..." aria-label="Найти фильм" /><kbd>/</kbd><button type="submit" aria-label="Искать"><ArrowRight size={18} /></button></form>
       <div className="catalog-toolbar"><div className="chip-row">{filters.map((item) => <button key={item} className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="sort-button" onClick={() => setFilter(filter === 'Новинки' ? 'Всё' : 'Новинки')}><SlidersHorizontal size={15} /> Сортировка <ChevronDown size={14} /></button></div>
       {catalogError && <ErrorState onRetry={() => void reloadCatalog()} />}
       <div className="result-label"><span>{searchPage ? 'Результаты поиска' : 'Каталог'}</span><span>{query ? `По запросу «${query}»` : 'Подборка КИНОВОЛНА'}</span></div>

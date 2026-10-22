@@ -844,8 +844,8 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const q = request.query.q === undefined ? '' : typeof request.query.q === 'string' && request.query.q.length <= 200 ? request.query.q.trim() : null;
     if (q === null) throw new RequestError(400, 'invalid_search', 'Поисковый запрос некорректен.');
     const category = request.query.category === undefined ? 'popular' : request.query.category;
-    if (!['popular', 'new', 'series'].includes(category)) throw new RequestError(400, 'invalid_category', 'Категория каталога некорректна.');
-    const kindClause = category === 'series' ? "AND media_type = 'tv'" : category === 'new' ? "AND media_type = 'movie'" : '';
+    if (!['popular', 'new'].includes(category)) throw new RequestError(400, 'invalid_category', 'Категория каталога некорректна.');
+    const kindClause = "AND media_type = 'movie'";
     const orderClause = category === 'new' ? 'year DESC, rating DESC' : 'rating DESC, year DESC';
     const values = [q, limit, offset];
     const where = `WHERE ($1 = '' OR title ILIKE '%' || $1 || '%' OR original_title ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%') ${kindClause} AND poster IS NOT NULL`;
@@ -859,10 +859,11 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     ) AS unique_titles
     WHERE title_rank = 1`;
     const [items, count] = await Promise.all([
-      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, replace(poster, '/w500/', '/original/') AS poster ${dedup} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
+      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, popularity, genre, replace(poster, '/w500/', '/original/') AS poster ${dedup} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
       pool.query(`SELECT COUNT(*)::bigint AS total ${dedup}`, [q]),
     ]);
     if (!Number(count.rows[0].total) && !q) throw new RequestError(503, 'catalog_not_synced', 'Каталог TMDB ещё не синхронизирован.');
+    const mostPopularId = items.rows.reduce((best, row) => Number(row.popularity || 0) > Number(best?.popularity || 0) ? row : best, null)?.tmdb_id;
     response.json({
       items: items.rows.map((row) => ({
         id: `tmdb-${row.media_type}-${row.tmdb_id}`,
@@ -874,7 +875,8 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         duration: '—',
         description: row.description || 'Описание отсутствует в TMDB.',
         poster: row.poster || '/favicon.svg',
-        kind: row.media_type === 'tv' ? 'Сериал' : 'Фильм',
+        kind: 'Фильм',
+        badge: row.tmdb_id === mostPopularId ? 'Ко‘p ko‘rilgan' : undefined,
         source: 'tmdb',
       })),
       pagination: { total: Number(count.rows[0].total), limit, offset },

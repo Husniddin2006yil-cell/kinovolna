@@ -33,7 +33,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, type TelegramUser } from './telegram';
+import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, type TelegramUser } from './telegram';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -61,6 +61,22 @@ const moodWaves = [
   { id: 'happy', title: 'Хорошее настроение', subtitle: 'Лёгкость и свет', symbol: '✦', className: 'mood-fresh' },
   { id: 'sad', title: 'Грустный вечер', subtitle: 'Тихие чувства', symbol: '…', className: 'mood-sad' },
 ];
+
+function normalizeMovieTitle(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase()
+    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function findTelegramFilmMatch(film: FilmItem, candidates: FilmItem[]): FilmItem | null {
+  const titles = new Set([film.title, film.originalTitle].map(normalizeMovieTitle).filter(Boolean));
+  return candidates.find((candidate) =>
+    [candidate.title, candidate.originalTitle].some((title) => titles.has(normalizeMovieTitle(title)))
+    && (!film.year || !candidate.year || Math.abs(film.year - candidate.year) <= 1),
+  ) ?? null;
+}
 
 function Logo() {
   return (
@@ -380,7 +396,7 @@ function App() {
       const matchesMood = !selectedMusicMood || track.moods.includes(selectedMusicMood);
       return matchesQuery && matchesMode && matchesMood;
     });
-  }, [musicFavorites, musicMode, musicQuery, selectedMusicMood]);
+  }, [musicTracks, musicFavorites, musicMode, musicQuery, selectedMusicMood]);
 
   const goTo = (next: Section) => {
     setSection(next);
@@ -407,22 +423,54 @@ function App() {
   const openUnavailable = (title: string, body: string, label = 'Интеграция не подключена') => setNotice({ title, body, label });
 
   const handleTelegramAction = async (film: FilmItem) => {
-    if (film.source !== 'telegram') {
-      openUnavailable('Это демонстрационный фильм', 'Для этого примера нет публикации в вашем канале. Подключите backend и загрузите реальный каталог.', 'Демо · нет Telegram-публикации');
+    if (film.source !== 'telegram' && film.source !== 'tmdb') {
+      openUnavailable('Это демонстрационный фильм', 'В демо-карточке нет публикации в Telegram-канале, поэтому бот не может отправить видео.', 'Демо · нет Telegram-публикации');
       return;
     }
     setTelegramBusy(true);
     try {
-      const result = await openFilmInTelegram(film.id);
+      let telegramFilm = film;
+      if (film.source === 'tmdb') {
+        const queries = [...new Set([film.title, film.originalTitle].map((value) => value.trim()).filter(Boolean))];
+        let match: FilmItem | null = null;
+        for (const query of queries) {
+          match = findTelegramFilmMatch(film, await searchTelegramFilms(query));
+          if (match) break;
+        }
+        if (!match) {
+          openUnavailable('Фильм не найден в Telegram-канале', 'В каталоге TMDB есть только карточка с метаданными. Чтобы бот отправил видео, соответствующая публикация должна быть в вашем Telegram-канале.', 'Нет публикации для отправки');
+          return;
+        }
+        telegramFilm = match;
+      }
+      const result = await openFilmInTelegram(telegramFilm.id);
       if (!result.ok) openUnavailable('Не удалось открыть Telegram', result.message ?? 'Проверьте настройки бота и доступ к закрытому каналу.', 'Telegram · проверка доступа');
+    } catch (error) {
+      openUnavailable('Не удалось найти фильм в Telegram', error instanceof Error ? error.message : 'Откройте Mini App из Telegram и повторите попытку.', 'Telegram · проверьте вход');
     } finally {
       setTelegramBusy(false);
     }
   };
 
   const handleWatchAction = async (film: FilmItem) => {
+    if (film.source === 'tmdb') {
+      try {
+        const availability = await requestTmdbWatchProviders(film.id, 'UZ');
+        if (!availability.link || !availability.providers.length) {
+          openUnavailable('Легальная площадка не найдена', `Для региона ${availability.region} TMDB / JustWatch сейчас не показывает сервис, где доступен этот фильм. КИНОВОЛНА не подменяет отсутствующий источник пиратской ссылкой.`, 'TMDB / JustWatch');
+          return;
+        }
+        const url = new URL(availability.link);
+        const webApp = getTelegramWebApp();
+        if (webApp?.openLink) webApp.openLink(url.href);
+        else window.location.assign(url.href);
+      } catch (error) {
+        openUnavailable('Не удалось найти легальный просмотр', error instanceof Error ? error.message : 'Попробуйте позже.', 'TMDB / JustWatch');
+      }
+      return;
+    }
     if (film.source !== 'telegram') {
-      openUnavailable('Источник онлайн-видео не подключён', film.source === 'tmdb' ? 'TMDB предоставляет метаданные, но не видеопоток. Подключите легального видеопровайдера для просмотра.' : 'Демо-карточка не содержит видео. Пост Telegram также не является прямой ссылкой для HTML5-плеера.', 'Нужен реальный видеосервис');
+      openUnavailable('Источник онлайн-видео не подключён', 'Демо-карточка не содержит видео. Выберите фильм из реального каталога, чтобы проверить доступные официальные источники.', 'Нужен реальный видеосервис');
       return;
     }
     const result = await requestFilmPlayback(film.id);
@@ -662,7 +710,7 @@ function App() {
           <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year || 'Год не указан'}<i />{film.duration}<i />{film.genre}</div>
           <p>{film.description}</p>
           <div className="detail-actions">
-            {film.source === 'telegram' && <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Проверяем доступ…' : 'Получить в Telegram'}</button>}
+            <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Ищем в Telegram…' : 'Отправить в бот'}</button>
             <button className="button button-glass" onClick={() => void handleWatchAction(film)}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
@@ -670,7 +718,7 @@ function App() {
         </div>
       </div>
       {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Первый сезон</div><h2>Серии</h2></div><button className="sort-button">Сезон 1 <ChevronDown size={14} /></button></div><div className="episode-list">{film.episodes?.map((episode, index) => <button key={episode} className="episode-row" onClick={() => openUnavailable('Видео пока не подключено', 'Источник видео серии и интеграция с Telegram-ботом пока не настроены.')}><span className="episode-number">{String(index + 1).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{episode}</strong><span className="episode-runtime">42 мин</span><ChevronRight size={16} /></button>)}</div></section>}
-      <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с реальной публикацией канала. Доступ проверяется сервером; отдельный источник онлайн-видео не подключён.' : film.source === 'tmdb' ? 'Метаданные и постер получены из TMDB. TMDB не предоставляет сам фильм; легальный видеопровайдер ещё не подключён.' : 'Сейчас показан демонстрационный каталог без соответствующего поста в канале и без видеопотока.'}</span></div>
+      <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с публикацией канала. Защищённый просмотр доступен только для подходящих видеофайлов; большие файлы можно запросить через бота.' : film.source === 'tmdb' ? 'TMDB предоставляет метаданные. Доступность легальных сервисов проверяется через JustWatch; само видео открывается на выбранной площадке, если оно доступно в регионе UZ.' : 'Сейчас показан демонстрационный каталог без соответствующего поста в канале и без видеопотока.'}</span></div>
     </section>
   );
 

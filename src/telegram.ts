@@ -142,6 +142,43 @@ export async function requestFilmPlayback(filmId: string): Promise<FilmActionRes
   }
 }
 
+export async function searchTelegramFilms(query: string): Promise<Film[]> {
+  const normalized = query.trim();
+  if (!normalized || normalized.length > 200) return [];
+  const payload = await apiRequest<{ items: Film[] }>(`/api/films?limit=100&q=${encodeURIComponent(normalized)}`);
+  return Array.isArray(payload.items) ? payload.items : [];
+}
+
+export type WatchProvidersResponse = {
+  provider: string;
+  region: string;
+  link: string | null;
+  providers: { name: string; category: string }[];
+  attribution: string;
+};
+
+export async function requestTmdbWatchProviders(filmId: string, region = 'UZ'): Promise<WatchProvidersResponse> {
+  if (!/^tmdb-(movie|tv)-\d+$/.test(filmId) || !/^[A-Za-z]{2}$/.test(region)) {
+    throw new CatalogApiError(400, 'invalid_watch_provider_request', 'Некорректный запрос легальных видеоплощадок.');
+  }
+  const payload = await apiRequest<WatchProvidersResponse>(`/api/catalog/${encodeURIComponent(filmId)}/watch-providers?region=${encodeURIComponent(region.toUpperCase())}`);
+  if (!Array.isArray(payload.providers) || typeof payload.region !== 'string') {
+    throw new CatalogApiError(502, 'invalid_watch_provider_response', 'Список видеоплощадок имеет неверный формат.');
+  }
+  if (payload.link) {
+    let url: URL;
+    try {
+      url = new URL(payload.link);
+    } catch {
+      throw new CatalogApiError(502, 'invalid_watch_provider_link', 'TMDB вернул некорректную ссылку.');
+    }
+    if (url.protocol !== 'https:' || url.hostname !== 'www.themoviedb.org' || !/\/watch(?:\/|$)/.test(url.pathname)) {
+      throw new CatalogApiError(502, 'invalid_watch_provider_link', 'TMDB вернул небезопасную ссылку.');
+    }
+  }
+  return payload;
+}
+
 export type MusicRecognitionResult = {
   matched: boolean;
   track?: { artist: string | null; title: string | null; album: string | null; releaseDate: string | null; songLink: string | null };

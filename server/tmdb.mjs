@@ -42,6 +42,13 @@ async function tmdbGet(path, apiKey) {
   return payload;
 }
 
+export async function fetchTmdbWatchProviders(apiKey, mediaType, tmdbId) {
+  if (!['movie', 'tv'].includes(mediaType) || !Number.isSafeInteger(tmdbId) || tmdbId <= 0) {
+    throw new TypeError('Invalid TMDB watch-provider request');
+  }
+  return tmdbGet(`/${mediaType}/${tmdbId}/watch/providers`, apiKey);
+}
+
 export async function fetchTmdbCatalog(apiKey) {
   if (!apiKey) throw new Error('TMDB API key is not configured');
   const [movieGenres, tvGenres, popularMovies, newMovies, popularSeries] = await Promise.all([

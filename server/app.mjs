@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
+import { fetchTmdbWatchProviders } from './tmdb.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
@@ -828,6 +829,43 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       provider: 'TMDB',
       category,
     });
+  }));
+
+  app.get('/api/catalog/:id/watch-providers', asyncRoute(async (request, response) => {
+    if (!needs(response, Boolean(config.tmdbConfigured && config.tmdbApiKey))) return;
+    const match = /^tmdb-(movie|tv)-([1-9]\d{0,8})$/.exec(request.params.id);
+    if (!match) throw new RequestError(400, 'invalid_tmdb_id', 'Некорректный идентификатор фильма.');
+    const region = request.query.region === undefined
+      ? 'UZ'
+      : typeof request.query.region === 'string' ? request.query.region.toUpperCase() : '';
+    if (!/^[A-Z]{2}$/.test(region)) throw new RequestError(400, 'invalid_region', 'Укажите двухбуквенный код страны.');
+
+    let payload;
+    try {
+      payload = await fetchTmdbWatchProviders(config.tmdbApiKey, match[1], Number(match[2]));
+    } catch {
+      return sendError(response, 502, 'watch_providers_unavailable', 'Не удалось загрузить список легальных площадок.');
+    }
+
+    const country = payload?.results?.[region];
+    const providerGroups = [['flatrate', 'subscription'], ['free', 'free'], ['ads', 'ads'], ['rent', 'rent'], ['buy', 'purchase']];
+    const providers = [];
+    for (const [source, category] of providerGroups) {
+      for (const item of Array.isArray(country?.[source]) ? country[source] : []) {
+        if (typeof item?.provider_name === 'string' && item.provider_name.trim()) {
+          providers.push({ name: item.provider_name.trim().slice(0, 120), category });
+        }
+      }
+    }
+
+    let link = null;
+    if (typeof country?.link === 'string') {
+      try {
+        const url = new URL(country.link);
+        if (url.protocol === 'https:' && url.hostname === 'www.themoviedb.org' && /\/watch(?:\/|$)/.test(url.pathname)) link = url.href;
+      } catch { /* Ignore malformed upstream links. */ }
+    }
+    response.json({ provider: 'TMDB / JustWatch', region, link, providers, attribution: 'Данные о доступности предоставлены JustWatch.' });
   }));
 
   app.get('/api/music/catalog', asyncRoute(async (request, response) => {

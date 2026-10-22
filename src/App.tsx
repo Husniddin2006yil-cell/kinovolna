@@ -86,7 +86,10 @@ function uniqueMovieTitles(items: FilmItem[]): FilmItem[] {
 function findTelegramFilmMatch(film: FilmItem, candidates: FilmItem[]): FilmItem | null {
   const titles = new Set([film.title, film.originalTitle].map(normalizeMovieTitle).filter(Boolean));
   return candidates.find((candidate) =>
-    [candidate.title, candidate.originalTitle].some((title) => titles.has(normalizeMovieTitle(title)))
+    [candidate.title, candidate.originalTitle].some((title) => {
+      const normalized = normalizeMovieTitle(title);
+      return titles.has(normalized) || [...titles].some((wanted) => normalized.length >= 5 && wanted.length >= 5 && (normalized.includes(wanted) || wanted.includes(normalized)));
+    })
     && (!film.year || !candidate.year || Math.abs(film.year - candidate.year) <= 1),
   ) ?? null;
 }
@@ -463,7 +466,14 @@ function App() {
     try {
       let telegramFilm = film;
       if (film.source === 'tmdb') {
-        const queries = [...new Set([film.title, film.originalTitle].map((value) => value.trim()).filter(Boolean))];
+        const titleBase = film.title.split(/[:–—|]/)[0].trim();
+        const titleWords = titleBase.split(/\s+/).filter(Boolean);
+        const queries = [...new Set([
+          film.title,
+          titleBase,
+          titleWords.slice(0, 3).join(' '),
+          film.originalTitle,
+        ].map((value) => value.trim()).filter((value) => value.length >= 3))];
         let match: FilmItem | null = null;
         for (const query of queries) {
           match = findTelegramFilmMatch(film, await searchTelegramFilms(query));

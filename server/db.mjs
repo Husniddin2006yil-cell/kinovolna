@@ -113,7 +113,7 @@ export async function migrate(pool) {
     `);
     const reset = await client.query(`
       INSERT INTO catalog_reset_once (reset_key)
-      VALUES ('empty-mini-app-catalog-2026-10-22')
+      VALUES ('empty-mini-app-catalog-2026-10-22-v2')
       ON CONFLICT (reset_key) DO NOTHING
       RETURNING reset_key
     `);

@@ -43,8 +43,12 @@ export async function startServer() {
 
     if (runtime.config.tmdbConfigured) {
       try {
-        const { rows } = await runtime.pool.query('SELECT count(*)::int AS count FROM tmdb_catalog');
-        if (Number(rows[0]?.count ?? 0) === 0) {
+        const { rows } = await runtime.pool.query(`
+          SELECT count(*)::int AS count,
+            EXISTS (SELECT 1 FROM catalog_reset_once WHERE reset_key LIKE 'empty-mini-app-catalog-%') AS catalog_was_reset
+          FROM tmdb_catalog
+        `);
+        if (Number(rows[0]?.count ?? 0) === 0 && !rows[0]?.catalog_was_reset) {
           const count = await syncTmdbCatalog(runtime.pool, runtime.config.tmdbApiKey);
           console.log(`Каталог TMDB загружен: ${count} записей.`);
         }

@@ -105,6 +105,25 @@ export async function migrate(pool) {
     await client.query('CREATE INDEX IF NOT EXISTS films_source_date_idx ON films (source_date DESC NULLS LAST, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_rating_idx ON tmdb_catalog (rating DESC, year DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_title_idx ON tmdb_catalog (title)');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS catalog_reset_once (
+        reset_key text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    const reset = await client.query(`
+      INSERT INTO catalog_reset_once (reset_key)
+      VALUES ('empty-mini-app-catalog-2026-10-22')
+      ON CONFLICT (reset_key) DO NOTHING
+      RETURNING reset_key
+    `);
+    if (reset.rows[0]) {
+      await client.query('DELETE FROM episodes');
+      await client.query('DELETE FROM seasons');
+      await client.query('DELETE FROM series');
+      await client.query('DELETE FROM films');
+      await client.query('DELETE FROM tmdb_catalog');
+    }
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);

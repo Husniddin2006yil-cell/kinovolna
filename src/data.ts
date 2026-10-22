@@ -12,6 +12,10 @@ export type Film = {
   kind: 'Фильм' | 'Сериал';
   episodes?: string[];
   source?: 'telegram' | 'tmdb' | 'demo';
+  videoAvailable?: boolean;
+  videoSize?: number | null;
+  videoMimeType?: string | null;
+  videoDuration?: number | null;
   channelId?: string;
   messageId?: number;
 };

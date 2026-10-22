@@ -71,6 +71,8 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
       channel_access_denied: 'Для доступа нужно вступить в закрытый канал.',
       telegram_unavailable: 'Telegram временно недоступен. Повторите позже.',
       video_source_not_configured: 'Реальный разрешённый источник онлайн-видео не подключён.',
+      video_too_large: 'Этот файл больше 20 МБ — Telegram Bot API не позволяет безопасно воспроизводить его в веб-плеере. Используйте «Отправить в бот».',
+      telegram_file_unavailable: 'Telegram временно не отдаёт этот видеофайл. Используйте «Отправить в бот».',
       film_not_found: 'Публикация фильма не найдена в серверном каталоге.',
     };
     throw new CatalogApiError(response.status, code, messages[code] ?? payload?.message ?? payload?.error?.message ?? 'Не удалось выполнить запрос к backend.');
@@ -134,7 +136,6 @@ export async function requestFilmPlayback(filmId: string): Promise<FilmActionRes
     if (!payload.url) return { ok: false, reason: 'not-configured', message: 'Источник онлайн-видео не подключён.' };
     const url = new URL(payload.url);
     if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid media URL');
-    window.location.assign(url.href);
     return { ok: true, url: url.href };
   } catch (error) {
     return { ok: false, reason: error instanceof CatalogApiError && error.code === 'video_source_not_configured' ? 'not-configured' : 'failed', message: error instanceof CatalogApiError ? error.message : 'Не удалось открыть источник видео.' };

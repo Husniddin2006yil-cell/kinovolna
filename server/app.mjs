@@ -12,6 +12,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
 const SAFE_TEXT_MAX = 10_000;
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const TELEGRAM_FILE_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 const MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807n;
 const BOT_WELCOME = 'Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?';
 
@@ -142,6 +143,22 @@ function parsePagination(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
+function signVideoToken(filmId, expiresAt, secret) {
+  const payload = `${filmId}.${expiresAt}`;
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifyVideoToken(token, secret, now = Math.floor(Date.now() / 1000)) {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3 || !UUID_RE.test(parts[0]) || !/^\d+$/.test(parts[1]) || !/^[A-Za-z0-9_-]{43}$/.test(parts[2])) return null;
+  const expiresAt = Number(parts[1]);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < now) return null;
+  const expected = signVideoToken(parts[0], expiresAt, secret).split('.')[2];
+  return safeEqualText(expected, parts[2]) ? { filmId: parts[0], expiresAt } : null;
+}
+
 function parseIntegerString(value, { positive = false, channel = false, safe = false } = {}) {
   const stringValue = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value : null;
   const pattern = channel ? /^-100\d+$/ : positive ? /^[1-9]\d*$/ : /^-?\d+$/;
@@ -183,6 +200,10 @@ function toFilm(row) {
     poster: row.poster || '/favicon.svg',
     kind: row.kind === 'Сериал' ? 'Сериал' : 'Фильм',
     source: 'telegram',
+    videoAvailable: Boolean(row.video_file_id),
+    videoSize: row.video_file_size ? Number(row.video_file_size) : null,
+    videoMimeType: row.video_mime_type || null,
+    videoDuration: Number.isInteger(row.video_duration) ? row.video_duration : Number(row.video_duration) || null,
     channelId: String(row.channel_id),
     messageId: Number.isSafeInteger(numericMessageId) ? numericMessageId : 0,
   };
@@ -226,6 +247,10 @@ function parseChannelFilm(message, updateId) {
     channelUsername: typeof message.chat.username === 'string' && TELEGRAM_USERNAME_RE.test(message.chat.username) ? message.chat.username : null,
     sourceDate: parseTelegramDate(message.date),
     updateId: String(updateId),
+    videoFileId: typeof message.video?.file_id === 'string' ? message.video.file_id : null,
+    videoFileSize: Number.isSafeInteger(message.video?.file_size) ? message.video.file_size : null,
+    videoMimeType: typeof message.video?.mime_type === 'string' ? message.video.mime_type.slice(0, 120) : null,
+    videoDuration: Number.isSafeInteger(message.video?.duration) ? message.video.duration : null,
   };
 }
 
@@ -399,7 +424,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function getFilmOr404(id, executor = pool) {
     if (!UUID_RE.test(id)) throw new RequestError(404, 'film_not_found', 'Фильм не найден.');
     const result = await executor.query(`
-      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster
+      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, video_file_id, video_file_size, video_mime_type, video_duration
       FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [id, config.telegramChannelId]);
@@ -424,17 +449,21 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
 
   async function upsertChannelFilm(client, film) {
     await client.query(`
-      INSERT INTO films (id, title, description, channel_id, message_id, channel_username, source_date, last_update_id)
-      VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7::timestamptz, $8::bigint)
+      INSERT INTO films (id, title, description, channel_id, message_id, channel_username, source_date, last_update_id, video_file_id, video_file_size, video_mime_type, video_duration)
+      VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7::timestamptz, $8::bigint, $9, $10::bigint, $11, $12)
       ON CONFLICT (channel_id, message_id) DO UPDATE SET
         title = EXCLUDED.title,
         description = EXCLUDED.description,
         channel_username = EXCLUDED.channel_username,
         source_date = EXCLUDED.source_date,
+        video_file_id = COALESCE(EXCLUDED.video_file_id, films.video_file_id),
+        video_file_size = COALESCE(EXCLUDED.video_file_size, films.video_file_size),
+        video_mime_type = COALESCE(EXCLUDED.video_mime_type, films.video_mime_type),
+        video_duration = COALESCE(EXCLUDED.video_duration, films.video_duration),
         last_update_id = EXCLUDED.last_update_id,
         updated_at = now()
       WHERE films.last_update_id <= EXCLUDED.last_update_id
-    `, [film.id, film.title, film.description, film.channelId, film.messageId, film.channelUsername, film.sourceDate, film.updateId]);
+    `, [film.id, film.title, film.description, film.channelId, film.messageId, film.channelUsername, film.sourceDate, film.updateId, film.videoFileId, film.videoFileSize, film.videoMimeType, film.videoDuration]);
   }
 
   async function sendSubscriptionInstructions(message) {
@@ -499,13 +528,22 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       return;
     }
     const result = await client.query(`
-      SELECT id, channel_id, message_id, channel_username FROM films
+      SELECT id, channel_id, message_id, channel_username, video_file_id FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [match[1], config.telegramChannelId]);
     const row = result.rows[0];
     if (!row) {
       await telegramClient.sendMessage(message.chat.id, 'Фильм не найден или больше недоступен.');
       return;
+    }
+    if (row.video_file_id) {
+      try {
+        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, { protect_content: true });
+        return;
+      } catch {
+        await telegramClient.sendMessage(message.chat.id, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
+        return;
+      }
     }
     const url = publicChannelUrl(row);
     if (!url) throw new RequestError(500, 'link_unavailable', 'Ссылка на фильм недоступна.');
@@ -666,7 +704,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const parameters = [config.telegramChannelId, q, limit, offset];
     const [films, count] = await Promise.all([
       pool.query(`
-        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster
+        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, video_file_id, video_file_size, video_mime_type, video_duration
         FROM films
         WHERE channel_id = $1::bigint AND message_id > 0 AND message_id <= 9007199254740991
           AND ($2 = '' OR title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')
@@ -700,8 +738,51 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   app.get('/api/films/:id/playback', asyncRoute(async (request, response) => {
     await authenticateMember(request, response);
     if (response.headersSent) return;
-    await getFilmOr404(request.params.id);
-    sendError(response, 503, 'video_source_not_configured', 'Источник видео пока не настроен.');
+    const film = await getFilmOr404(request.params.id);
+    if (!film.video_file_id) return sendError(response, 503, 'video_source_not_configured', 'У этой публикации нет доступного видеофайла.');
+    const size = film.video_file_size ? Number(film.video_file_size) : null;
+    if (size && size > TELEGRAM_FILE_DOWNLOAD_LIMIT) {
+      return sendError(response, 413, 'video_too_large', 'Telegram Bot API не позволяет безопасно отдавать этот файл в веб-плеер: размер превышает 20 МБ. Используйте кнопку «Отправить в бот».');
+    }
+    const expiresAt = Math.floor(Date.now() / 1000) + 300;
+    const token = signVideoToken(film.id, expiresAt, config.telegramBotToken);
+    const base = config.publicBaseUrl || config.appOrigins[0];
+    if (!base) return sendError(response, 503, 'video_source_not_configured', 'Публичный HTTPS-адрес сервера не настроен.');
+    response.json({ url: `${base}/api/films/${film.id}/stream?token=${encodeURIComponent(token)}`, expiresAt, mimeType: film.video_mime_type || 'video/mp4' });
+  }));
+
+  app.get('/api/films/:id/stream', asyncRoute(async (request, response) => {
+    const verified = verifyVideoToken(request.query.token, config.telegramBotToken);
+    if (!verified || verified.filmId !== request.params.id) return sendError(response, 401, 'invalid_video_token', 'Ссылка на видео истекла. Откройте фильм заново.');
+    const film = await getFilmOr404(request.params.id);
+    if (!film.video_file_id) return sendError(response, 404, 'video_not_found', 'Видео не найдено.');
+    const size = film.video_file_size ? Number(film.video_file_size) : null;
+    if (size && size > TELEGRAM_FILE_DOWNLOAD_LIMIT) return sendError(response, 413, 'video_too_large', 'Видео слишком большое для веб-просмотра через Telegram Bot API.');
+    let file;
+    try {
+      file = await telegramClient.getFile(film.video_file_id);
+    } catch {
+      return sendError(response, 502, 'telegram_file_unavailable', 'Telegram не вернул видеофайл. Используйте кнопку «Отправить в бот».');
+    }
+    if (!file?.file_path) return sendError(response, 502, 'telegram_file_unavailable', 'Путь к видеофайлу недоступен.');
+    const upstreamUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
+    const headers = {};
+    if (typeof request.get('range') === 'string' && /^bytes=\d*-\d*$/.test(request.get('range'))) headers.Range = request.get('range');
+    let upstream;
+    try {
+      upstream = await fetch(upstreamUrl, { headers, signal: AbortSignal.timeout(30_000) });
+    } catch {
+      return sendError(response, 502, 'telegram_file_unavailable', 'Не удалось получить видео из Telegram.');
+    }
+    response.status(upstream.status);
+    response.set('Content-Type', film.video_mime_type || upstream.headers.get('content-type') || 'video/mp4');
+    for (const header of ['content-length', 'content-range', 'accept-ranges']) {
+      const value = upstream.headers.get(header);
+      if (value) response.set(header, value);
+    }
+    if (!upstream.body) return response.end();
+    for await (const chunk of upstream.body) response.write(chunk);
+    response.end();
   }));
 
   app.get('/api/films/:id', asyncRoute(async (request, response) => {
@@ -749,7 +830,11 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
 
     const databaseAvailable = Boolean(pool && config.databaseConfigured);
-    const channelMessage = update.channel_post || update.edited_channel_post;
+    const directChannelMessage = update.channel_post || update.edited_channel_post;
+    const forwardedMessage = update.message && update.message.chat?.type === 'private' && update.message.from && config.telegramAdminIds.has(String(update.message.from.id)) && update.message.forward_from_chat && String(update.message.forward_from_chat.id) === config.telegramChannelId && update.message.forward_from_message_id
+      ? { ...update.message, chat: update.message.forward_from_chat, message_id: update.message.forward_from_message_id, date: update.message.forward_date || update.message.date }
+      : null;
+    const channelMessage = directChannelMessage || forwardedMessage;
     if (channelMessage && (!databaseAvailable || !config.channelConfigured)) {
       return sendError(response, 503, 'configuration_required', 'Для приема публикаций из канала необходимо настроить базу данных и Telegram-канал.');
     }
@@ -768,7 +853,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         await upsertChannelFilm(client, film);
         return 'catalogued';
       }
-      if (update.message) {
+      if (update.message && !forwardedMessage) {
         await processStartMessage(client, update.message);
         return 'message';
       }

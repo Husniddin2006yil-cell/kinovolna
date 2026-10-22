@@ -53,5 +53,7 @@ export function createTelegramClient(token) {
     setWebhook: (options) => call('setWebhook', options),
     setChatMenuButton: (options) => call('setChatMenuButton', options),
     sendMessage: (chatId, text, options = {}) => call('sendMessage', { chat_id: chatId, text, ...options }),
+    copyMessage: (chatId, fromChatId, messageId, options = {}) => call('copyMessage', { chat_id: chatId, from_chat_id: fromChatId, message_id: messageId, ...options }),
+    getFile: (fileId) => call('getFile', { file_id: fileId }),
   });
 }

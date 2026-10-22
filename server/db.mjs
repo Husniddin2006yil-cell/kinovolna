@@ -30,6 +30,10 @@ export async function migrate(pool) {
         received_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_file_id text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_file_size bigint');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_mime_type text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_duration integer');
     await client.query(`
       CREATE TABLE IF NOT EXISTS tmdb_catalog (
         tmdb_id integer NOT NULL,

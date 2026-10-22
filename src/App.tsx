@@ -262,6 +262,7 @@ function App() {
   const [isSplashLeaving, setIsSplashLeaving] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const reloadCatalog = useCallback(async () => {
     setCatalogMode('loading');
@@ -426,6 +427,7 @@ function App() {
     }
     const result = await requestFilmPlayback(film.id);
     if (!result.ok) openUnavailable(result.reason === 'failed' ? 'Не удалось открыть просмотр' : 'Источник онлайн-видео не подключён', result.message ?? 'Пока разрешённый видеопоток не настроен, фиктивная ссылка не открывается.', result.reason === 'failed' ? 'Ошибка backend' : 'Нужно подключить видеосервис');
+    else if (result.url) setVideoUrl(result.url);
   };
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -706,6 +708,7 @@ function App() {
       <nav className="mobile-nav" aria-label="Мобильная навигация">
         {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`mobile-nav-item ${section === id && !selectedFilm ? 'mobile-nav-active' : ''}`} onClick={() => goTo(id)}><span className="mobile-icon-wrap"><Icon size={19} strokeWidth={section === id ? 2.3 : 1.8} /></span><span>{label}</span></button>)}
       </nav>
+      {videoUrl && <div className="player-overlay" onClick={() => setVideoUrl(null)} role="presentation"><section className="player-modal video-modal" role="dialog" aria-modal="true" aria-label="Онлайн просмотр" onClick={(event) => event.stopPropagation()}><button className="player-close icon-button" onClick={() => setVideoUrl(null)} aria-label="Закрыть видео"><X size={19} /></button><Tag><Play size={13} fill="currentColor" /> КИНОВОЛНА · ОНЛАЙН</Tag><h2>{selectedFilm?.title ?? 'Видео'}</h2><video className="film-video" controls autoPlay playsInline src={videoUrl}>Ваш браузер не поддерживает видео.</video><p className="video-modal-note">Видеопоток отдается сервером через Telegram Bot API по временной защищённой ссылке.</p></section></div>}
       {playerOpen && <div className="player-overlay" onClick={() => setPlayerOpen(false)} role="presentation"><section className="player-modal" role="dialog" aria-modal="true" aria-label="Полноэкранный плеер" onClick={(event) => event.stopPropagation()}>
         <button className="player-close icon-button" onClick={() => setPlayerOpen(false)} aria-label="Закрыть плеер"><X size={19} /></button>
         <div className={`player-cover ${activeTrack?.coverStyle ?? 'cover-moon'}`}><AudioLines size={45} /></div>

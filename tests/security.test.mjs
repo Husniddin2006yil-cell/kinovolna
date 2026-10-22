@@ -118,6 +118,16 @@ test('music recognition preserves the real audio container and maps AudD errors 
     assert.equal(warnings.at(-1)[1].error_message, `provider detail ${code}`);
     assert.doesNotMatch(JSON.stringify(warnings.at(-1)), /server-only-test-token/);
   }
+
+  globalThis.fetch = async (input, init) => {
+    if (String(input) !== 'https://api.audd.io/') return realFetch(input, init);
+    return new Response(JSON.stringify({ status: 'error', error: { error_code: '902', error_message: 'Recognition failed: authorization=[redacted] the limit was reached.' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const exhausted = await fetch(`${base}/api/music/recognize`, { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: webm });
+  assert.equal(exhausted.status, 502);
+  assert.match((await exhausted.json()).error.message, /Лимит запросов AudD исчерпан/);
+  assert.equal(warnings.at(-1)[1].error_code, '902');
+  assert.doesNotMatch(JSON.stringify(warnings.at(-1)), /server-only-test-token/);
 });
 
 test('configured auth endpoint verifies signed body without trusting user JSON', async (t) => {

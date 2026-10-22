@@ -363,13 +363,15 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       const errorCode = safeProviderText(providerError?.error_code ?? providerError?.code ?? payload?.error_code ?? payload?.code ?? 'unknown');
       const errorMessage = safeProviderText(providerError?.error_message ?? providerError?.message ?? payload?.error_message ?? payload?.message ?? 'unknown');
       console.warn('[music] AudD recognition failed', { http_status: providerResponse.status, error_code: errorCode, error_message: errorMessage, mime: descriptor.mime, extension: descriptor.extension, bytes: request.body.length });
-      const clientMessage = {
+      const clientMessage = errorCode === '902' && /limit.{0,40}(reached|exceeded)|quota.{0,40}(reached|exceeded)/i.test(errorMessage)
+        ? 'Лимит запросов AudD исчерпан. Проверьте квоту или тариф ключа AudD.'
+        : ({
         '900': 'Ключ AudD не принят или закончился лимит бесплатных запросов.',
         '902': 'Ключ AudD недействителен. Проверьте серверную настройку API-ключа.',
         '700': 'AudD не получил корректный аудиофайл. Повторите запись ещё раз.',
         '500': 'AudD не смог прочитать аудиофайл. Попробуйте записать фрагмент в другом браузере.',
         '300': 'Фрагмент слишком короткий для распознавания. Запишите музыку не менее нескольких секунд.',
-      }[errorCode] ?? 'AudD не смог обработать запись. Проверьте аудио и настройки сервиса.';
+      }[errorCode] ?? 'AudD не смог обработать запись. Проверьте аудио и настройки сервиса.');
       return sendError(response, 502, 'recognition_failed', clientMessage);
     }
     if (!payload.result) return response.json({ matched: false });

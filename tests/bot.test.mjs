@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { createHmac } from 'node:crypto';
 import { createApp } from '../server/app.mjs';
 import { readConfig } from '../server/config.mjs';
+import { setTelegramWebhookOnlyIfEmpty } from '../server/telegram-webhook.mjs';
 import { signInitData, testBotToken, testEnvironment, testUser, testWebhookSecret } from './helpers.mjs';
 
 const welcome = 'Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?';
@@ -32,6 +33,10 @@ function createTelegramStub({ membership = 'administrator', webhookInfo = { url:
       getChat: async () => ({ type: 'channel', title: 'Test Channel' }),
       getChatMember: async () => ({ status: membership }),
       getWebhookInfo: async () => webhookInfo,
+      setWebhook: async (parameters) => {
+        calls.push({ method: 'setWebhook', parameters });
+        return true;
+      },
       getFile: async (fileId) => {
         calls.push({ method: 'getFile', parameters: { file_id: fileId } });
         return { file_path: 'photos/poster.jpg' };
@@ -305,6 +310,32 @@ test('telegram diagnostics are admin-only and redact webhook error details', asy
   assert.match(diagnostics.webhook.lastErrorMessage, /401 Unauthorized/);
   assert.doesNotMatch(JSON.stringify(diagnostics), new RegExp(tokenLike));
   assert.doesNotMatch(diagnostics.webhook.lastErrorMessage, /private\.example|hidden/);
+});
+
+test('safe webhook setup only creates a missing webhook and never replaces an existing URL', async () => {
+  const secret = 'test_webhook_secret_123456789';
+  const config = readConfig(testEnvironment({
+    PUBLIC_BASE_URL: 'https://kinovolna-test.app',
+    TELEGRAM_WEBHOOK_SECRET: secret,
+  }));
+  const target = 'https://kinovolna-test.app/api/telegram/webhook';
+
+  const empty = createTelegramStub({ webhookInfo: { url: '' } });
+  assert.deepEqual(await setTelegramWebhookOnlyIfEmpty(config, empty.client), { status: 'configured', changed: true });
+  assert.deepEqual(empty.calls.filter((call) => call.method === 'setWebhook').map((call) => call.parameters), [{
+    url: target,
+    secret_token: secret,
+    allowed_updates: ['channel_post', 'edited_channel_post', 'message', 'callback_query'],
+    drop_pending_updates: false,
+  }]);
+
+  const same = createTelegramStub({ webhookInfo: { url: target } });
+  assert.deepEqual(await setTelegramWebhookOnlyIfEmpty(config, same.client), { status: 'already_configured', changed: false });
+  assert.equal(same.calls.some((call) => call.method === 'setWebhook'), false);
+
+  const other = createTelegramStub({ webhookInfo: { url: 'https://other.example/webhook' } });
+  await assert.rejects(setTelegramWebhookOnlyIfEmpty(config, other.client), /refusing to replace it/);
+  assert.equal(other.calls.some((call) => call.method === 'setWebhook'), false);
 });
 
 test('channel media-group updates retain both the movie caption and Telegram poster/video IDs', async (t) => {

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { readConfig } from '../server/config.mjs';
 import { createTelegramClient } from '../server/telegram.mjs';
 import { getTelegramDiagnostics } from '../server/telegram-diagnostics.mjs';
+import { setTelegramWebhookOnlyIfEmpty } from '../server/telegram-webhook.mjs';
 
 const command = process.argv[2] || 'check';
 const replaceWebhook = process.argv.includes('--replace-webhook');
@@ -53,6 +54,11 @@ async function webhook() {
   console.log(JSON.stringify({ status: 'webhook_set', replacedExistingWebhook: Boolean(current?.url && current.url !== target) }));
 }
 
+async function webhookIfEmpty() {
+  const result = await setTelegramWebhookOnlyIfEmpty(config, needTelegram());
+  console.log(JSON.stringify(result));
+}
+
 async function menu() {
   if (!config.miniAppUrl) throw new Error('MINI_APP_URL должен быть HTTPS URL.');
   const telegram = needTelegram();
@@ -65,8 +71,9 @@ async function menu() {
 try {
   if (command === 'check') await check();
   else if (command === 'webhook') await webhook();
+  else if (command === 'webhook-if-empty') await webhookIfEmpty();
   else if (command === 'menu') await menu();
-  else throw new Error('Использование: telegram-setup.mjs [check|webhook|menu] [--replace-webhook]');
+  else throw new Error('Использование: telegram-setup.mjs [check|webhook|webhook-if-empty|menu] [--replace-webhook]');
 } catch (error) {
   // Telegram errors are already sanitised by the client; never print request details.
   fail(error instanceof Error ? error.message : 'Не удалось настроить Telegram.');

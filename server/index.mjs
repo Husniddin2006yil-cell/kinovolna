@@ -17,6 +17,17 @@ export function createServerRuntime(env = process.env) {
   return { config, pool, telegram, app: createApp({ config, pool, telegram }) };
 }
 
+function runTelegramSetupCommand(command) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(process.cwd(), 'scripts/telegram-setup.mjs'), command], { env: process.env, stdio: 'inherit' });
+    child.on('error', () => {
+      console.warn(`[telegram-setup] ${command} could not be started; service remains online.`);
+      resolve(1);
+    });
+    child.on('exit', (code) => resolve(code ?? 1));
+  });
+}
+
 export async function startServer() {
   const runtime = createServerRuntime();
   if (runtime.pool) {
@@ -47,11 +58,14 @@ export async function startServer() {
   const server = runtime.app.listen(runtime.config.port, host, () => {
     console.log(`API запущен: ${host}:${runtime.config.port}`);
     if (runtime.config.nodeEnv === 'production') {
-      const diagnostic = spawn(process.execPath, [path.join(process.cwd(), 'scripts/telegram-setup.mjs'), 'check'], { env: process.env, stdio: 'inherit' });
-      diagnostic.on('error', () => console.warn('[telegram-diagnostic] Read-only check could not be started; service remains online.'));
-      diagnostic.on('exit', (code) => {
-        if (code !== 0) console.warn(`[telegram-diagnostic] Read-only check exited with code ${code}; service remains online.`);
-      });
+      void (async () => {
+        if (runtime.config.telegramConfigured && runtime.config.publicBaseUrl && runtime.config.telegramWebhookSecret) {
+          const setupCode = await runTelegramSetupCommand('webhook-if-empty');
+          if (setupCode !== 0) console.warn('[telegram-webhook] Safe setup did not change the existing webhook; service remains online.');
+        }
+        const checkCode = await runTelegramSetupCommand('check');
+        if (checkCode !== 0) console.warn('[telegram-diagnostic] Read-only check failed; service remains online.');
+      })();
     }
   });
   const shutdown = async () => {

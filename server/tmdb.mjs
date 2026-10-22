@@ -1,5 +1,7 @@
 const TMDB_API_ROOT = 'https://api.themoviedb.org/3';
-const TMDB_IMAGE_ROOT = 'https://image.tmdb.org/t/p/w500';
+// Use TMDB's highest available poster rendition. TMDB does not guarantee a
+// 4K source for every title, but `original` avoids artificially downscaling it.
+const TMDB_IMAGE_ROOT = 'https://image.tmdb.org/t/p/original';
 const TMDB_BACKDROP_ROOT = 'https://image.tmdb.org/t/p/w1280';
 
 function normalizeTitle(value) {

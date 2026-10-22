@@ -856,7 +856,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     ) AS unique_titles
     WHERE title_rank = 1`;
     const [items, count] = await Promise.all([
-      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, poster ${dedup} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
+      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, replace(poster, '/w500/', '/original/') AS poster ${dedup} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
       pool.query(`SELECT COUNT(*)::bigint AS total ${dedup}`, [q]),
     ]);
     if (!Number(count.rows[0].total) && !q) throw new RequestError(503, 'catalog_not_synced', 'Каталог TMDB ещё не синхронизирован.');

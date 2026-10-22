@@ -33,7 +33,8 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, type TelegramUser } from './telegram';
+import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, type TelegramUser } from './telegram';
+import { YouTubePlayer } from './components/YouTubePlayer';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -170,7 +171,7 @@ function TrackRow({ track, index, isFavorite, onFavorite, onSelect, onArtist }: 
   return (
     <div className="track-row">
       <span className="track-rank">{String(index + 1).padStart(2, '0')}</span>
-      <div className={`track-cover ${track.coverStyle}`}><AudioLines size={18} /></div>
+      <div className={`track-cover ${track.coverStyle}`}>{track.thumbnailUrl ? <img className="track-cover-image" src={track.thumbnailUrl} alt="" loading="lazy" /> : <AudioLines size={18} />}</div>
       <div className="track-info">
         <strong>{track.title}</strong>
         <span><button className="artist-inline" onClick={onArtist}>{track.artist}</button><i />{track.album}</span>
@@ -267,6 +268,9 @@ function App() {
   const [favorites, setFavorites] = useState<string[]>(['echoes']);
   const [musicFavorites, setMusicFavorites] = useState<string[]>(['bluehour']);
   const [musicTracks, setMusicTracks] = useState<Track[]>([]);
+  const [youtubeSearchResults, setYoutubeSearchResults] = useState<Track[] | null>(null);
+  const [youtubeSearchBusy, setYoutubeSearchBusy] = useState(false);
+  const [youtubeSearchError, setYoutubeSearchError] = useState<string | null>(null);
   const [musicCatalogError, setMusicCatalogError] = useState<string | null>(null);
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>(['neon', 'city']);
@@ -489,8 +493,26 @@ function App() {
   const chooseTrack = (track: Track) => {
     setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
     setActiveTrack(track);
-    if (track.audioUrl) setPlayerOpen(true);
+    if (track.audioUrl || track.youtubeVideoId) setPlayerOpen(true);
     else openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist}. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток.`, 'Музыка · источник недоступен');
+  };
+
+  const submitYoutubeSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const term = musicQuery.trim();
+    if (!term) return;
+    setYoutubeSearchBusy(true);
+    setYoutubeSearchError(null);
+    setYoutubeSearchResults(null);
+    try {
+      const results = await searchYoutubeMusic(term);
+      setYoutubeSearchResults(results);
+      if (!results.length) setYoutubeSearchError('По этому запросу YouTube не нашёл подходящих встроенных видео. Попробуйте другое название или исполнителя.');
+    } catch (error) {
+      setYoutubeSearchError(error instanceof Error ? error.message : 'Поиск YouTube временно недоступен.');
+    } finally {
+      setYoutubeSearchBusy(false);
+    }
   };
 
   const handleMusicRecognition = async () => {
@@ -556,7 +578,7 @@ function App() {
           isFavorite={musicFavorites.includes(track.id)}
           onFavorite={() => toggleMusicFavorite(track.id)}
           onSelect={() => chooseTrack(track)}
-          onArtist={() => setSelectedArtist(track.artist)}
+          onArtist={() => { if (track.source === 'youtube') { setMusicQuery(track.artist); setYoutubeSearchResults(null); } else setSelectedArtist(track.artist); }}
         />
       ))}
     </div>
@@ -671,14 +693,16 @@ function App() {
         <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Deezer previews</Tag></div>
         <div className="artist-grid">{[...new Set(musicTracks.map((track) => track.artist))].map((artist, index) => <button key={artist} className="artist-card" onClick={() => setSelectedArtist(artist)}><span className={`artist-avatar artist-avatar-${index + 1}`}><AudioLines size={20} /></span><strong>{artist}</strong><span>Deezer</span></button>)}</div>
 
-        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Трек, альбом или исполнитель</div><h2>Музыкальная библиотека</h2></div><Tag>{musicCatalogError ? 'Источник недоступен' : 'Deezer · 30 сек preview'}</Tag></div>
-        <form className="large-search music-search" onSubmit={(event) => event.preventDefault()}><Search size={18} /><input value={musicQuery} onChange={(event) => setMusicQuery(event.target.value)} placeholder="Найти песню, альбом или исполнителя..." aria-label="Поиск музыки" /><button type="button" className="music-favorite-filter" onClick={() => setMusicMode((mode) => mode === 'all' ? 'favorites' : 'all')} aria-label="Переключить избранные треки"><Heart size={15} fill={musicMode === 'favorites' ? 'currentColor' : 'none'} /></button></form>
-        <div className="music-list-toolbar"><div className="chip-row"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все треки</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}><Heart size={12} /> Избранное</button>{selectedMusicMood && <button className="filter-chip active" onClick={() => setSelectedMusicMood(null)}>Волна: {moodWaves.find((mood) => mood.id === selectedMusicMood)?.title ?? 'настроение'} <X size={12} /></button>}</div><span>{filteredTracks.length} треков</span></div>
-        {renderTrackList(filteredTracks)}
+        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Песня или исполнитель</div><h2>Поиск на YouTube</h2></div><Tag>Официальный YouTube-плеер</Tag></div>
+        <form className="large-search music-search" onSubmit={(event) => void submitYoutubeSearch(event)}><Search size={18} /><input value={musicQuery} onChange={(event) => { setMusicQuery(event.target.value); setYoutubeSearchResults(null); setYoutubeSearchError(null); }} placeholder="Название песни или исполнитель..." aria-label="Поиск песни или исполнителя на YouTube" /><button type="submit" className="youtube-search-button" disabled={youtubeSearchBusy || !musicQuery.trim()}>{youtubeSearchBusy ? 'Ищем…' : 'Искать'}</button></form>
+        <p className="youtube-search-note">Показываются видео, которые YouTube отмечает как доступные для встраивания и просмотра в вашем регионе. Правообладатель может всё равно ограничить плеер.</p>
+        {youtubeSearchError && <div className="youtube-search-error" role="alert">{youtubeSearchError}</div>}
+        <div className="music-list-toolbar"><div><span>{youtubeSearchResults ? 'Результаты YouTube' : 'Популярные треки Deezer'}</span></div><span>{youtubeSearchBusy ? 'Загрузка…' : (youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks)).length} треков</span></div>
+        {renderTrackList(youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks))}
         <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Запишем до 8 секунд с микрофона и отправим фрагмент в AudD. Результат появляется только при реальном совпадении.</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}>{recognitionBusy ? 'Слушаем…' : 'Распознать'} <ChevronRight size={14} /></button></div>
         <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">Ваша история</div><h2>Недавно слушали</h2></div><Tag>Демо · последние выборы</Tag></div>
         {recentlySelectedTracks.length ? renderTrackList(recentlySelectedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Выбранные треки появятся здесь. В прототипе это демо-история, а не подтверждённое воспроизведение.</span></div>}
-        <p className="recent-music-note">{musicCatalogError ?? 'Доступны легальные 30-секундные preview Deezer. Полные треки не скачиваются и не подменяются фиктивными файлами.'}</p>
+        <p className="recent-music-note">{musicCatalogError ?? 'Треки Deezer доступны как 30-секундные preview. Поиск YouTube показывает только официальный встроенный плеер; загрузки аудио нет.'}</p>
       </section>
     );
   };
@@ -748,9 +772,9 @@ function App() {
       </main>
       <div className="mini-player">
         <button className={`mini-art ${activeTrack?.coverStyle ?? ''}`} onClick={() => setPlayerOpen(true)} aria-label="Открыть плеер"><AudioLines size={17} /></button>
-        <button className="mini-info" onClick={() => setPlayerOpen(true)}><strong>{activeTrack?.title ?? 'Выберите музыку'}</strong><span>{activeTrack ? `${activeTrack.artist} · источник не подключён` : 'Подключение аудиоисточника впереди'}</span></button>
+        <button className="mini-info" onClick={() => setPlayerOpen(true)}><strong>{activeTrack?.title ?? 'Выберите музыку'}</strong><span>{activeTrack ? `${activeTrack.artist} · ${activeTrack.youtubeVideoId ? 'YouTube' : activeTrack.audioUrl ? 'Deezer preview' : 'источник не подключён'}` : 'Выберите песню для прослушивания'}</span></button>
         <div className="mini-progress"><span /></div>
-        <button className="mini-play" onClick={() => activeTrack?.audioUrl ? setPlayerOpen(true) : openUnavailable('Аудио пока не подключено', 'В этой версии нет аудиофайла или потока для воспроизведения. Плеер заработает после подключения разрешённого источника.', 'Нужен аудиоисточник')} aria-label="Статус аудиоисточника"><Play size={16} fill="currentColor" /></button>
+        <button className="mini-play" onClick={() => activeTrack?.audioUrl || activeTrack?.youtubeVideoId ? setPlayerOpen(true) : openUnavailable('Аудио пока не подключено', 'В этой версии нет аудиофайла или потока для воспроизведения. Плеер заработает после подключения разрешённого источника.', 'Нужен аудиоисточник')} aria-label="Открыть проигрыватель"><Play size={16} fill="currentColor" /></button>
         <button className="mini-expand" onClick={() => setPlayerOpen(true)} aria-label="Открыть полноэкранный плеер"><Maximize2 size={15} /></button>
       </div>
       <nav className="mobile-nav" aria-label="Мобильная навигация">
@@ -760,10 +784,10 @@ function App() {
       {playerOpen && <div className="player-overlay" onClick={() => setPlayerOpen(false)} role="presentation"><section className="player-modal" role="dialog" aria-modal="true" aria-label="Полноэкранный плеер" onClick={(event) => event.stopPropagation()}>
         <button className="player-close icon-button" onClick={() => setPlayerOpen(false)} aria-label="Закрыть плеер"><X size={19} /></button>
         <div className={`player-cover ${activeTrack?.coverStyle ?? 'cover-moon'}`}><AudioLines size={45} /></div>
-        <Tag><Disc3 size={13} /> {activeTrack?.audioUrl ? 'DEEZER · PREVIEW' : 'ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН'}</Tag>
+        <Tag><Disc3 size={13} /> {activeTrack?.youtubeVideoId ? 'YOUTUBE · ОФИЦИАЛЬНЫЙ ПЛЕЕР' : activeTrack?.audioUrl ? 'DEEZER · PREVIEW' : 'ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН'}</Tag>
         <h2>{activeTrack?.title ?? 'Выберите трек'}</h2>
         <button className="player-artist" onClick={() => { if (activeTrack) { setPlayerOpen(false); setSelectedArtist(activeTrack.artist); setSection('music'); } }}>{activeTrack?.artist ?? 'КИНОВОЛНА'}</button>
-        {activeTrack?.audioUrl ? <audio className="real-audio-preview" controls preload="none" src={activeTrack.audioUrl}>Ваш браузер не поддерживает аудио.</audio> : <><div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div><div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div><div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div></>}
+        {activeTrack?.youtubeVideoId ? <><YouTubePlayer videoId={activeTrack.youtubeVideoId} title={activeTrack.title} /><p className="video-modal-note">Воспроизведение идёт в официальном плеере YouTube. Ограниченные ролики можно заменить другим результатом поиска.</p></> : activeTrack?.audioUrl ? <audio className="real-audio-preview" controls preload="none" src={activeTrack.audioUrl}>Ваш браузер не поддерживает аудио.</audio> : <><div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div><div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div><div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div></>}
       </section></div>}
       {notice && <div className="modal-backdrop" onClick={() => setNotice(null)} role="presentation"><section className="notice-modal" role="dialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><button className="modal-close icon-button" onClick={() => setNotice(null)} aria-label="Закрыть"><X size={18} /></button><div className="modal-emblem"><Info size={20} /></div><span className="eyebrow">{notice.label ?? 'Информация'}</span><h2 id="notice-title">{notice.title}</h2><p>{notice.body}</p><button className="button button-primary modal-done" onClick={() => setNotice(null)}>Понятно <Check size={16} /></button></section></div>}
     </div>

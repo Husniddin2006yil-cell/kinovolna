@@ -57,7 +57,7 @@ function createPool(filmCount = '0', films = []) {
         const query = String(parameters[1] ?? '').toLowerCase();
         return { rows: films.filter((film) => film.title.toLowerCase().includes(query)).sort((a, b) => Number(b.title.toLowerCase() === query) - Number(a.title.toLowerCase() === query)).slice(0, 9) };
       }
-      if (statement.startsWith('SELECT id, title, year, kind, channel_id, message_id, channel_username, video_file_id FROM films WHERE id = $1')) {
+      if (statement.startsWith('SELECT id, title, channel_id, message_id, channel_username, video_file_id FROM films WHERE id = $1') || statement.startsWith('SELECT id, title, year, kind, channel_id, message_id, channel_username, video_file_id FROM films WHERE id = $1')) {
         return { rows: films.filter((film) => film.id === parameters[0] && film.channel_id === parameters[1]) };
       }
       if (statement.startsWith('SELECT id, title, description, channel_id, message_id, channel_username, source_date, year') && statement.includes('WHERE channel_id = $1::bigint')) {
@@ -239,6 +239,7 @@ test('private chat title search sends one matching channel video with copyMessag
     fromChatId: film.channel_id,
     messageId: film.message_id,
     protect_content: true,
+    caption: film.title,
   });
 });
 
@@ -251,7 +252,8 @@ test('ambiguous bot title search offers private selection buttons and copies the
   assert.equal(buttons.length, 2);
   assert.equal(buttons[1][0].callback_data, `filmselect_${second.id}`);
   assert.equal((await deliver(base, callbackUpdate(22, testUser, buttons[1][0].callback_data))).status, 200);
-  assert.ok(calls.some((call) => call.method === 'copyMessage' && call.parameters.messageId === second.message_id));
+  const copied = calls.find((call) => call.method === 'copyMessage' && call.parameters.messageId === second.message_id);
+  assert.equal(copied?.parameters.caption, second.title);
 });
 
 test('bot title search reports no match and does not reveal results to an unsubscribed user', async (t) => {

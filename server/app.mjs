@@ -9,6 +9,7 @@ import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
 import { fetchTmdbWatchProviders } from './tmdb.mjs';
+import { searchYoutubeMusic, YouTubeApiError } from './youtube.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
@@ -519,7 +520,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function sendFilmToPrivateChat(chatId, film) {
     if (film.video_file_id) {
       try {
-        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, { protect_content: true });
+        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, { protect_content: true, caption: film.title });
         return;
       } catch {
         await telegramClient.sendMessage(chatId, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
@@ -687,7 +688,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       return;
     }
     const result = await client.query(`
-      SELECT id, channel_id, message_id, channel_username, video_file_id FROM films
+      SELECT id, title, channel_id, message_id, channel_username, video_file_id FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [match[1], config.telegramChannelId]);
     const row = result.rows[0];
@@ -697,7 +698,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
     if (row.video_file_id) {
       try {
-        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, { protect_content: true });
+        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, { protect_content: true, caption: row.title });
         return;
       } catch {
         await telegramClient.sendMessage(message.chat.id, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
@@ -778,6 +779,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     channelConfigured: config.channelConfigured,
     audioRecognitionConfigured: Boolean(config.audioRecognitionApiKey),
     tmdbConfigured: config.tmdbConfigured,
+    youtubeConfigured: Boolean(config.youtubeDataApiKey),
   }));
 
   app.get('/api/admin/telegram/diagnostics', asyncRoute(async (request, response) => {
@@ -896,6 +898,29 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       source: 'deezer',
     }));
     response.json({ provider: 'Deezer', previewSeconds: 30, items });
+  }));
+
+  app.get('/api/music/youtube', asyncRoute(async (request, response) => {
+    if (!config.youtubeDataApiKey) return sendError(response, 503, 'youtube_not_configured', 'Для поиска музыки добавьте YOUTUBE_API_KEY в переменные окружения Render.');
+    const query = request.query.q === undefined
+      ? ''
+      : typeof request.query.q === 'string' && request.query.q.length <= 120 ? request.query.q.trim() : null;
+    if (query === null || !query) throw new RequestError(400, 'invalid_search', 'Введите название песни или исполнителя.');
+    try {
+      const items = await searchYoutubeMusic(query, config.youtubeDataApiKey, { region: 'UZ' });
+      response.json({ provider: 'YouTube', region: 'UZ', items });
+    } catch (error) {
+      if (error instanceof YouTubeApiError) {
+        const status = error.code === 'youtube_quota_exceeded' ? 429 : error.code === 'youtube_access_denied' ? 503 : 502;
+        const message = error.code === 'youtube_quota_exceeded'
+          ? 'Дневной лимит поиска YouTube исчерпан. Попробуйте завтра.'
+          : error.code === 'youtube_access_denied'
+            ? 'YouTube Data API отклонил запрос. Проверьте ключ и доступ API.'
+            : 'Поиск YouTube временно недоступен. Попробуйте ещё раз.';
+        return sendError(response, status, error.code, message);
+      }
+      return sendError(response, 502, 'youtube_search_unavailable', 'Поиск YouTube временно недоступен. Попробуйте ещё раз.');
+    }
   }));
 
   app.get('/api/films', asyncRoute(async (request, response) => {

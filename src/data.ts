@@ -31,7 +31,9 @@ export type Track = {
   moods: string[];
   audioUrl?: string;
   sourceUrl?: string;
-  source?: 'deezer' | 'demo';
+  source?: 'deezer' | 'youtube' | 'demo';
+  youtubeVideoId?: string;
+  thumbnailUrl?: string | null;
 };
 
 const poster = {

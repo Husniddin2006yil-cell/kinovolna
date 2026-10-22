@@ -57,7 +57,7 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     assert.equal((await fetch(`${base}/api/health`)).status, 200);
     assert.equal((await fetch(`${base}/api/ready`)).status, 200);
     const configResponse = await (await fetch(`${base}/api/config`)).json();
-    assert.deepEqual(configResponse, { telegramConfigured: true, databaseConfigured: true, channelConfigured: true, audioRecognitionConfigured: false, tmdbConfigured: false });
+    assert.deepEqual(configResponse, { telegramConfigured: true, databaseConfigured: true, channelConfigured: true, audioRecognitionConfigured: false, tmdbConfigured: false, youtubeConfigured: false });
     assert.equal(JSON.stringify(configResponse).includes(testWebhookSecret), false);
   });
 
@@ -134,7 +134,7 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     const message = { update_id: 10, message: { message_id: 10, date: Math.floor(Date.now() / 1000), chat: { id: testUser.id, type: 'private' }, from: testUser, text: `/start film_${filmId}` } };
     assert.equal((await post(message)).status, 200);
     assert.equal(state.copied.length, 1);
-    assert.deepEqual(state.copied[0], { chatId: testUser.id, fromChatId: testChannel, messageId: '55', options: { protect_content: true } });
+    assert.deepEqual(state.copied[0], { chatId: testUser.id, fromChatId: testChannel, messageId: '55', options: { protect_content: true, caption: 'Tahrirlangan film' } });
     assert.equal((await post(message)).status, 200);
     assert.equal(state.copied.length, 1);
     state.membership = 'left';

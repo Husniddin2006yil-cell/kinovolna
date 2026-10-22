@@ -33,7 +33,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadFilmDetail, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, type TelegramUser } from './telegram';
+import { getTelegramWebApp, loadFilmDetail, loadMusicCatalog, loadNotificationPreference, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, setNotificationPreference, type TelegramUser } from './telegram';
 import { MusicPlayer } from './components/MusicPlayer';
 import { useAppViewport } from './useAppViewport';
 import { openAudioTracks } from './open-audio';
@@ -274,6 +274,8 @@ function App() {
   const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'tmdb' | 'demo' | 'blocked'>('loading');
   const [catalogMessage, setCatalogMessage] = useState('');
   const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
   const [telegramBusy, setTelegramBusy] = useState(false);
   const [filter, setFilter] = useState('Всё');
   const [musicMode, setMusicMode] = useState<'all' | 'favorites'>('all');
@@ -328,6 +330,26 @@ function App() {
     getTelegramWebApp()?.ready?.();
     void reloadCatalog();
   }, [reloadCatalog]);
+
+  useEffect(() => {
+    if (!telegramUser) return;
+    void loadNotificationPreference().then(setNotificationsEnabled).catch(() => setNotificationsEnabled(false));
+  }, [telegramUser]);
+
+  const toggleNotifications = async () => {
+    if (notificationsBusy || !telegramUser) {
+      if (!telegramUser) openUnavailable('Telegram kerak', 'Bildirishnomalarni yoqish uchun Mini App’ni Telegram botidan oching.');
+      return;
+    }
+    setNotificationsBusy(true);
+    try {
+      const enabled = await setNotificationPreference(!notificationsEnabled);
+      setNotificationsEnabled(enabled);
+      setNotice({ title: enabled ? 'Bildirishnomalar yoqildi' : 'Bildirishnomalar o‘chirildi', body: enabled ? 'Yangi kino kanalga tushsa, bot chatiga xabar yuboriladi. Buning uchun bot avval /start bilan ishga tushirilgan bo‘lishi kerak.' : 'Yangi kino haqida botdan xabar kelmaydi.', label: 'Telegram bot' });
+    } catch (error) {
+      openUnavailable('Bildirishnomani yoqib bo‘lmadi', error instanceof Error ? error.message : 'Telegram botini /start bilan ishga tushiring.');
+    } finally { setNotificationsBusy(false); }
+  };
 
   useEffect(() => {
     let active = true;
@@ -815,7 +837,7 @@ function App() {
         </nav>
         <div className="topbar-actions">
           <form className="top-search" onSubmit={submitSearch}><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск..." aria-label="Поиск по каталогу" /><kbd>/</kbd></form>
-          <button className="icon-button notification-button" onClick={() => openUnavailable('Уведомления', 'Уведомления о новых материалах появятся после подключения Telegram-бота.')} aria-label="Уведомления"><Bell size={18} /><i /></button>
+          <button className={`icon-button notification-button ${notificationsEnabled ? 'is-favorite' : ''}`} onClick={() => void toggleNotifications()} aria-label={notificationsEnabled ? 'Отключить уведомления' : 'Включить уведомления'} disabled={notificationsBusy}><Bell size={18} fill={notificationsEnabled ? 'currentColor' : 'none'} /><i /></button>
           <button className="top-avatar" onClick={() => goTo('profile')} aria-label="Открыть профиль"><span>КВ</span></button>
         </div>
       </header>

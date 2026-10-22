@@ -102,6 +102,15 @@ export async function migrate(pool) {
       )
     `);
     await client.query('ALTER TABLE tmdb_catalog ADD COLUMN IF NOT EXISTS popularity numeric NOT NULL DEFAULT 0');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notification_subscribers (
+        user_id bigint PRIMARY KEY,
+        chat_id bigint NOT NULL,
+        enabled boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS films_title_search_idx ON films USING gin (to_tsvector(\'simple\', title || \' \' || description))');
     await client.query('CREATE INDEX IF NOT EXISTS films_source_date_idx ON films (source_date DESC NULLS LAST, created_at DESC)');
     await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_rating_idx ON tmdb_catalog (rating DESC, year DESC)');

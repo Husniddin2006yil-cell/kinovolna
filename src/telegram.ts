@@ -199,6 +199,20 @@ export async function loadFilmDetail(filmId: string): Promise<Film> {
   return apiRequest<Film>(`/api/films/${encodeURIComponent(filmId)}`);
 }
 
+export async function loadNotificationPreference(): Promise<boolean> {
+  const payload = await apiRequest<{ enabled: boolean }>('/api/notifications');
+  return payload.enabled === true;
+}
+
+export async function setNotificationPreference(enabled: boolean): Promise<boolean> {
+  const payload = await apiRequest<{ enabled: boolean }>('/api/notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  return payload.enabled === true;
+}
+
 export type WatchProvidersResponse = {
   provider: string;
   region: string;

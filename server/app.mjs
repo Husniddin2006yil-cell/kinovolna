@@ -690,6 +690,9 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
     const name = command[1].toLowerCase();
     const payload = command[2]?.trim();
+    if (name === 'start' && client) {
+      await client.query('INSERT INTO notification_subscribers (user_id, chat_id, enabled) VALUES ($1::bigint, $1::bigint, true) ON CONFLICT (user_id) DO UPDATE SET chat_id = EXCLUDED.chat_id, enabled = true, updated_at = now()', [message.from.id]);
+    }
     if (name === 'help') {
       await telegramClient.sendMessage(message.chat.id, 'Команды КИНОВОЛНА:\n/start — открыть КИНОВОЛНУ\nОтправьте название фильма, чтобы найти его и получить видео\n/help — краткая инструкция\n/id — показать ваш Telegram ID\n/admin — меню администратора (только для администратора).');
       return;
@@ -835,6 +838,27 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     if (!needs(response, Boolean(config.telegramConfigured && telegramClient))) return;
     const auth = verifyTelegramInitData(request.body?.initData, config.telegramBotToken, config.telegramInitDataMaxAge);
     response.json(auth);
+  }));
+
+  app.get('/api/notifications', asyncRoute(async (request, response) => {
+    await authenticateMember(request, response);
+    if (response.headersSent) return;
+    const auth = authenticate(request);
+    const result = await pool.query('SELECT enabled FROM notification_subscribers WHERE user_id = $1::bigint', [auth.user.id]);
+    response.json({ enabled: Boolean(result.rows[0]?.enabled) });
+  }));
+
+  app.post('/api/notifications', asyncRoute(async (request, response) => {
+    await authenticateMember(request, response);
+    if (response.headersSent) return;
+    const auth = authenticate(request);
+    const enabled = request.body?.enabled === true;
+    if (enabled) {
+      await pool.query(`INSERT INTO notification_subscribers (user_id, chat_id, enabled) VALUES ($1::bigint, $1::bigint, true) ON CONFLICT (user_id) DO UPDATE SET chat_id = EXCLUDED.chat_id, enabled = true, updated_at = now()`, [auth.user.id]);
+    } else {
+      await pool.query('UPDATE notification_subscribers SET enabled = false, updated_at = now() WHERE user_id = $1::bigint', [auth.user.id]);
+    }
+    response.json({ enabled });
   }));
 
   app.get('/api/catalog', asyncRoute(async (request, response) => {
@@ -1200,6 +1224,22 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         if (!film) return 'ignored';
         if (!film.sourceDate) throw new RequestError(400, 'invalid_update', 'Некорректная дата сообщения Telegram.');
         await upsertChannelFilm(client, film);
+        if (directChannelMessage && update.channel_post) {
+          const subscribers = await client.query('SELECT chat_id FROM notification_subscribers WHERE enabled = true');
+          const stored = await client.query('SELECT id, title FROM films WHERE channel_id = $1::bigint AND message_id = $2::bigint LIMIT 1', [film.channelId, film.messageId]);
+          const storedFilm = stored.rows[0];
+          if (storedFilm && subscribers.rows.length) {
+            const botLink = config.telegramBotUsername ? `https://t.me/${config.telegramBotUsername}?start=film_${storedFilm.id}` : null;
+            const text = `🎬 Yangi kino qo‘shildi: ${storedFilm.title}`;
+            for (const subscriber of subscribers.rows) {
+              try {
+                await telegramClient.sendMessage(subscriber.chat_id, text, botLink ? { reply_markup: { inline_keyboard: [[{ text: 'Botdan olish', url: botLink }]] } } : {});
+              } catch {
+                // Telegram may reject users who blocked the bot; keep other notifications working.
+              }
+            }
+          }
+        }
         return 'catalogued';
       }
       if (update.message && !forwardedMessage) {

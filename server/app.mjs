@@ -467,19 +467,137 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   }
 
   async function sendSubscriptionInstructions(message) {
-    const lines = ['Для доступа подпишитесь на канал и снова откройте ссылку.'];
-    if (config.telegramChannelInviteUrl) lines.push(config.telegramChannelInviteUrl);
-    await telegramClient.sendMessage(message.chat.id, lines.join('\n'));
+    const keyboard = [];
+    if (config.telegramChannelInviteUrl) keyboard.push([{ text: 'Открыть канал', url: config.telegramChannelInviteUrl }]);
+    keyboard.push([{ text: 'Я подписался — проверить', callback_data: 'membership_recheck' }]);
+    await telegramClient.sendMessage(message.chat.id, 'Для доступа подпишитесь на канал, затем нажмите кнопку проверки подписки.', {
+      reply_markup: { inline_keyboard: keyboard },
+    });
+  }
+
+  async function sendFilmToPrivateChat(chatId, film) {
+    if (film.video_file_id) {
+      try {
+        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, { protect_content: true });
+        return;
+      } catch {
+        await telegramClient.sendMessage(chatId, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
+        return;
+      }
+    }
+    const url = publicChannelUrl(film);
+    await telegramClient.sendMessage(chatId, url ? `Нашёл публикацию, но в каталоге пока нет видеофайла: ${url}` : 'У этой публикации пока нет доступного видеофайла.');
+  }
+
+  async function requireBotChatMember(message) {
+    let member;
+    try {
+      member = await telegramClient.getChatMember(config.telegramChannelId, message.from.id);
+    } catch {
+      throw new RequestError(503, 'membership_check_failed', 'Не удалось проверить подписку на канал.');
+    }
+    if (!isMember(member)) {
+      await sendSubscriptionInstructions(message);
+      return false;
+    }
+    return true;
+  }
+
+  async function searchFilmsForBot(client, message, rawQuery) {
+    const chatId = message.chat.id;
+    const query = rawQuery.trim();
+    if (query.length < 2 || query.length > 120) {
+      await telegramClient.sendMessage(chatId, 'Введите название фильма длиной от 2 до 120 символов.');
+      return;
+    }
+    if (!client || !pool || !config.databaseConfigured || !config.channelConfigured || !telegramClient) {
+      await telegramClient.sendMessage(chatId, 'Каталог фильмов пока не подключён. Попробуйте позже.');
+      return;
+    }
+    if (!await requireBotChatMember(message)) return;
+    const result = await client.query(`
+      SELECT id, title, year, kind, channel_id, message_id, channel_username, video_file_id
+      FROM films
+      WHERE channel_id = $1::bigint AND message_id > 0 AND message_id <= 9007199254740991
+        AND position(lower($2) in lower(title)) > 0
+      ORDER BY (lower(title) = lower($2)) DESC, title ASC
+      LIMIT 9
+    `, [config.telegramChannelId, query]);
+    const films = result.rows;
+    if (!films.length) {
+      await telegramClient.sendMessage(chatId, 'Кино не найдено, проверьте название.');
+      return;
+    }
+    if (films.length === 1) {
+      await sendFilmToPrivateChat(chatId, films[0]);
+      return;
+    }
+    const visibleFilms = films.slice(0, 8);
+    const buttons = visibleFilms.map((film) => {
+      const suffix = film.year ? ` (${film.year})` : '';
+      const title = Array.from(String(film.title)).slice(0, 56).join('');
+      return [{ text: `${title}${suffix}`.slice(0, 64), callback_data: `filmselect_${film.id}` }];
+    });
+    await telegramClient.sendMessage(chatId, `Нашёл несколько вариантов по запросу «${query}». Выберите нужный фильм:`, {
+      reply_markup: { inline_keyboard: buttons },
+    });
+  }
+
+  async function processFilmSelection(client, callback) {
+    const userId = callback?.from?.id;
+    const chatId = callback?.message?.chat?.id;
+    const match = typeof callback?.data === 'string' ? callback.data.match(/^filmselect_([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i) : null;
+    if (!Number.isSafeInteger(userId) || userId <= 0 || String(chatId) !== String(userId) || callback?.message?.chat?.type !== 'private' || !match) return;
+    await telegramClient.call('answerCallbackQuery', { callback_query_id: callback.id });
+    if (!client || !pool || !config.databaseConfigured || !config.channelConfigured) {
+      await telegramClient.sendMessage(chatId, 'Каталог фильмов пока не подключён. Попробуйте позже.');
+      return;
+    }
+    const message = { chat: callback.message.chat, from: callback.from };
+    if (!await requireBotChatMember(message)) return;
+    const result = await client.query(`
+      SELECT id, title, year, kind, channel_id, message_id, channel_username, video_file_id
+      FROM films
+      WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
+    `, [match[1], config.telegramChannelId]);
+    if (!result.rows[0]) {
+      await telegramClient.sendMessage(chatId, 'Фильм не найден или больше недоступен.');
+      return;
+    }
+    await sendFilmToPrivateChat(chatId, result.rows[0]);
+  }
+
+  async function processMembershipRecheck(callback) {
+    const userId = callback?.from?.id;
+    const chatId = callback?.message?.chat?.id;
+    if (!Number.isSafeInteger(userId) || userId <= 0 || String(chatId) !== String(userId) || callback?.message?.chat?.type !== 'private') return;
+    await telegramClient.call('answerCallbackQuery', { callback_query_id: callback.id });
+    let member;
+    try {
+      member = await telegramClient.getChatMember(config.telegramChannelId, userId);
+    } catch {
+      await telegramClient.sendMessage(chatId, 'Не удалось проверить подписку на канал. Попробуйте ещё раз позже.');
+      return;
+    }
+    if (isMember(member)) {
+      await telegramClient.sendMessage(chatId, 'Подписка подтверждена. Отправьте название фильма или снова откройте ссылку на фильм.');
+      return;
+    }
+    await sendSubscriptionInstructions({ chat: callback.message.chat, from: callback.from });
   }
 
   async function processStartMessage(client, message) {
     if (message.chat?.type !== 'private' || !message.from || String(message.from.id) !== String(message.chat.id) || typeof message.text !== 'string') return;
     const command = message.text.trim().match(/^\/([A-Za-z0-9_]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/);
-    if (!command) return;
+    if (!command) {
+      const query = message.text.trim();
+      if (query && !query.startsWith('/')) await searchFilmsForBot(client, message, query);
+      return;
+    }
     const name = command[1].toLowerCase();
     const payload = command[2]?.trim();
     if (name === 'help') {
-      await telegramClient.sendMessage(message.chat.id, 'Команды КИНОВОЛНА:\n/start — открыть КИНОВОЛНУ\n/help — краткая инструкция\n/id — показать ваш Telegram ID\n/admin — меню администратора (только для администратора).');
+      await telegramClient.sendMessage(message.chat.id, 'Команды КИНОВОЛНА:\n/start — открыть КИНОВОЛНУ\nОтправьте название фильма, чтобы найти его и получить видео\n/help — краткая инструкция\n/id — показать ваш Telegram ID\n/admin — меню администратора (только для администратора).');
       return;
     }
     if (name === 'id') {
@@ -858,7 +976,13 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         return 'message';
       }
       if (update.callback_query) {
-        await processAdminCallback(client, update.callback_query);
+        if (typeof update.callback_query.data === 'string' && update.callback_query.data.startsWith('filmselect_')) {
+          await processFilmSelection(client, update.callback_query);
+        } else if (update.callback_query.data === 'membership_recheck') {
+          await processMembershipRecheck(update.callback_query);
+        } else {
+          await processAdminCallback(client, update.callback_query);
+        }
         return 'callback_query';
       }
       return 'ignored';

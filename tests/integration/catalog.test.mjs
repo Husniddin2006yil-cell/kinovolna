@@ -17,7 +17,7 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
   await setupPool.query(`CREATE SCHEMA ${schema}`);
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}`, max: 6 });
   const config = readConfig(testEnvironment({ DATABASE_URL: databaseUrl }));
-  const state = { membership: 'member', upstreamFails: false, sent: [] };
+  const state = { membership: 'member', upstreamFails: false, sent: [], copied: [] };
   const telegram = {
     async getChatMember(channelId, userId) {
       assert.equal(String(channelId), testChannel);
@@ -28,6 +28,10 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     async sendMessage(chatId, text, options = {}) {
       state.sent.push({ chatId, text, options });
       return { message_id: state.sent.length };
+    },
+    async copyMessage(chatId, fromChatId, messageId, options = {}) {
+      state.copied.push({ chatId, fromChatId, messageId, options });
+      return { message_id: state.copied.length };
     },
   };
   await migrate(pool);
@@ -126,18 +130,25 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     assert.equal((await api('/api/films/orbit/telegram')).status, 404);
   });
 
-  await t.test('bot /start film_UUID resolves the original private channel post', async () => {
+  await t.test('bot /start film_UUID copies the original private channel video', async () => {
     const message = { update_id: 10, message: { message_id: 10, date: Math.floor(Date.now() / 1000), chat: { id: testUser.id, type: 'private' }, from: testUser, text: `/start film_${filmId}` } };
     assert.equal((await post(message)).status, 200);
-    assert.equal(state.sent.length, 1);
-    assert.match(state.sent[0].text, /https:\/\/t\.me\/c\/1234567890\/55/);
+    assert.equal(state.copied.length, 1);
+    assert.deepEqual(state.copied[0], { chatId: testUser.id, fromChatId: testChannel, messageId: '55', options: { protect_content: true } });
     assert.equal((await post(message)).status, 200);
-    assert.equal(state.sent.length, 1);
+    assert.equal(state.copied.length, 1);
     state.membership = 'left';
     assert.equal((await post({ ...message, update_id: 11 })).status, 200);
-    assert.equal(state.sent.length, 2);
-    assert.doesNotMatch(state.sent[1].text, /\/55/);
+    assert.equal(state.sent.length, 1);
+    assert.match(state.sent[0].text, /подпишитесь на канал/);
     state.membership = 'member';
+  });
+
+  await t.test('private bot message searches the PostgreSQL catalog by movie title', async () => {
+    const updateMessage = { update_id: 12, message: { message_id: 12, date: Math.floor(Date.now() / 1000), chat: { id: testUser.id, type: 'private' }, from: testUser, text: 'Tahrirlangan film' } };
+    assert.equal((await post(updateMessage)).status, 200);
+    assert.equal(state.copied.length, 2);
+    assert.equal(state.copied.at(-1).messageId, '55');
   });
 
   await t.test('admin import is authorized, additive, scoped and keeps existing UUID', async () => {

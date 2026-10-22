@@ -36,6 +36,8 @@ def api(route):
     path = route.request.url.split(BASE)[-1]
     if '/api/config' in path:
         body = {'telegramConfigured': True, 'databaseConfigured': True, 'channelConfigured': True, 'tmdbConfigured': True, 'audioRecognitionConfigured': False}
+    elif '/trailer' in path:
+        body = {'trailer': {'key': 'QwErTy12345', 'name': 'Official test trailer', 'type': 'Trailer', 'official': True, 'sourceUrl': 'https://www.youtube.com/watch?v=QwErTy12345'}, 'attribution': 'TMDB'}
     elif '/api/catalog' in path or '/api/films' in path:
         body = {'items': [film], 'pagination': {'total': 1, 'limit': 100, 'offset': 0}}
     elif '/api/music/search' in path:
@@ -56,8 +58,10 @@ with sync_playwright() as p:
     context.route('**/api/**', api)
     context.route('https://upload.wikimedia.org/test.wav', lambda r: r.fulfill(status=200, content_type='audio/wav', body=wave_bytes.getvalue()))
     context.route('https://upload.wikimedia.org/test-next.wav', lambda r: r.fulfill(status=200, content_type='audio/wav', body=wave_bytes.getvalue()))
+    context.route('https://www.youtube-nocookie.com/**', lambda r: r.fulfill(status=200, content_type='text/html', body='<html><body>Embedded trailer test double</body></html>'))
     context.route('https://telegram.org/**', lambda r: r.fulfill(status=200, content_type='application/javascript', body=''))
     page = context.new_page()
+    page.add_init_script("if (location.protocol === 'http:' && location.hostname === '127.0.0.1') { localStorage.setItem('kinovolna:music-library', JSON.stringify([{id:'old-seed',title:'Old saved track'}])); localStorage.setItem('kinovolna:music-favorites', JSON.stringify(['old-seed'])); localStorage.setItem('kinovolna:music-history', JSON.stringify(['old-seed'])); }")
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(BASE)
@@ -73,6 +77,17 @@ with sync_playwright() as p:
     assert page.evaluate('document.documentElement.scrollWidth') == 390
     passed('Search keeps the initial Telegram viewport, does not expand/autofocus, and avoids horizontal overflow')
 
+    page.get_by_role('button', name='Кино', exact=True).click()
+    page.get_by_role('button', name='Подробнее: Test movie', exact=True).click()
+    page.get_by_role('button', name='Смотреть трейлер', exact=True).click()
+    trailer_frame = page.locator('iframe.film-trailer-frame')
+    trailer_frame.wait_for()
+    assert trailer_frame.get_attribute('src') == 'https://www.youtube-nocookie.com/embed/QwErTy12345?autoplay=1&rel=0'
+    assert page.get_by_text('Ограничение Telegram на размер файла к этому потоку не применяется.', exact=False).is_visible()
+    page.get_by_role('button', name='Закрыть трейлер', exact=True).click()
+    page.get_by_role('button', name='Назад', exact=True).click()
+    passed('TMDB-listed trailer opens in an inline YouTube player; Telegram’s bot-file size limit is not applied to the external stream')
+
     page.locator('.main-search-input').fill('Test')
     page.set_viewport_size({'width': 390, 'height': 380})
     page.wait_for_timeout(100)
@@ -85,6 +100,11 @@ with sync_playwright() as p:
     passed('Keyboard viewport shrink restores the stable Mini App height')
 
     page.get_by_role('button', name='Музыка', exact=True).click()
+    assert page.get_by_text('Начните с чистого листа', exact=True).is_visible()
+    assert page.locator('.track-row').count() == 0
+    assert page.evaluate("JSON.parse(localStorage.getItem('kinovolna:music-library'))") == []
+    assert page.evaluate("JSON.parse(localStorage.getItem('kinovolna:music-favorites'))") == []
+    assert page.evaluate("JSON.parse(localStorage.getItem('kinovolna:music-history'))") == []
     recognition = page.get_by_role('button', name='Распознавание не подключено', exact=True)
     recognition.wait_for()
     assert recognition.is_disabled()
@@ -101,7 +121,7 @@ with sync_playwright() as p:
     music_text = page.locator('.music-page').inner_text()
     assert 'YouTube' not in music_text and 'Deezer' not in music_text
     assert page.locator('iframe').count() == 0
-    passed('Music search displays only Commons audio rows with creator, file and license links; no video iframe')
+    passed('Music opens with no embedded or demo tracks; search displays only Commons audio rows with creator, file and license links, without a video iframe')
 
     row.get_by_role('button', name='Добавить трек в избранное').click()
     assert 'is-favorite' in row.get_by_role('button', name='Убрать трек из избранного').get_attribute('class')

@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
-import { fetchTmdbWatchProviders, matchTmdbPoster } from './tmdb.mjs';
+import { fetchTmdbTrailer, fetchTmdbWatchProviders, matchTmdbPoster } from './tmdb.mjs';
 import { searchCommonsAudio } from './commons-audio.mjs';
 import { movieCopyOptions } from './movie-caption.mjs';
 
@@ -943,6 +943,29 @@ export function createApp({ config = readConfig(), pool = null, telegram = null,
       } catch { /* Ignore malformed upstream links. */ }
     }
     response.json({ provider: 'TMDB / JustWatch', region, link, providers, attribution: 'Данные о доступности предоставлены JustWatch.' });
+  }));
+
+  app.get('/api/catalog/:id/trailer', rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (_request, response) => sendError(response, 429, 'trailer_rate_limited', 'Слишком много запросов к трейлерам. Подождите минуту и попробуйте снова.'),
+  }), asyncRoute(async (request, response) => {
+    if (!needs(response, Boolean(config.tmdbConfigured && config.tmdbApiKey))) return;
+    const match = /^tmdb-(movie|tv)-([1-9]\d{0,8})$/.exec(request.params.id);
+    if (!match) throw new RequestError(400, 'invalid_tmdb_id', 'Некорректный идентификатор фильма TMDB.');
+
+    let trailer;
+    try {
+      trailer = await fetchTmdbTrailer(config.tmdbApiKey, match[1], Number(match[2]));
+    } catch {
+      return sendError(response, 502, 'tmdb_trailer_unavailable', 'Не удалось загрузить трейлер из TMDB.');
+    }
+    response.json({
+      trailer,
+      attribution: 'Данные о трейлере предоставлены TMDB; воспроизведение выполняется встроенным плеером YouTube.',
+    });
   }));
 
   app.get('/api/music/search', rateLimit({

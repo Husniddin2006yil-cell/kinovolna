@@ -28,10 +28,9 @@ import {
   X,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getPublicConfig, getTelegramWebApp, loadFilmDetail, loadNotificationPreference, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchCommonsAudio, searchTelegramFilms, setNotificationPreference, type TelegramUser } from './telegram';
+import { getPublicConfig, getTelegramWebApp, loadFilmDetail, loadNotificationPreference, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbTrailer, requestTmdbWatchProviders, searchCommonsAudio, searchTelegramFilms, setNotificationPreference, type TelegramUser, type TmdbTrailer } from './telegram';
 import { MusicPlayer } from './components/MusicPlayer';
 import { useAppViewport } from './useAppViewport';
-import { openAudioTracks } from './open-audio';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -297,6 +296,8 @@ function App() {
   const [catalogError, setCatalogError] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [trailer, setTrailer] = useState<TmdbTrailer | null>(null);
+  const [trailerBusy, setTrailerBusy] = useState(false);
 
   const reloadCatalog = useCallback(async () => {
     setCatalogMode('loading');
@@ -386,14 +387,17 @@ function App() {
     try {
       const saved = window.localStorage.getItem('kinovolna:favorites');
       const savedHistory = window.localStorage.getItem('kinovolna:history');
-      const savedMusicFavorites = window.localStorage.getItem('kinovolna:music-favorites');
-      const savedMusicLibrary = window.localStorage.getItem('kinovolna:music-library');
-      const savedRecentTracks = window.localStorage.getItem('kinovolna:music-history');
       if (saved) setFavorites(JSON.parse(saved) as string[]);
       if (savedHistory) setHistory(JSON.parse(savedHistory) as string[]);
-      if (savedMusicFavorites) setMusicFavorites(JSON.parse(savedMusicFavorites) as string[]);
-      if (savedMusicLibrary) setMusicTracks(JSON.parse(savedMusicLibrary) as Track[]);
-      if (savedRecentTracks) setRecentTrackIds(JSON.parse(savedRecentTracks) as string[]);
+      if (window.localStorage.getItem('kinovolna:music-clean-slate-v1') !== 'done') {
+        window.localStorage.removeItem('kinovolna:music-favorites');
+        window.localStorage.removeItem('kinovolna:music-library');
+        window.localStorage.removeItem('kinovolna:music-history');
+        window.localStorage.setItem('kinovolna:music-clean-slate-v1', 'done');
+        setMusicFavorites([]);
+        setMusicTracks([]);
+        setRecentTrackIds([]);
+      }
     } catch {
       // Local storage is optional in Telegram's embedded browser.
     }
@@ -451,12 +455,12 @@ function App() {
   }, [films, filter, query]);
 
   const filteredTracks = useMemo(() => {
-    const source = musicSearchResults ?? (musicMode === 'favorites' ? [...openAudioTracks, ...musicTracks] : openAudioTracks);
+    const source = musicSearchResults ?? musicTracks;
     const unique = [...new Map(source.map((track) => [track.id, track] as const)).values()];
     return unique.filter((track) => musicMode === 'all' || musicFavorites.includes(track.id));
-  }, [musicSearchResults, musicFavorites, musicMode]);
+  }, [musicSearchResults, musicFavorites, musicMode, musicTracks]);
 
-  const musicQueue = useMemo(() => musicSearchResults ?? openAudioTracks, [musicSearchResults]);
+  const musicQueue = useMemo(() => musicSearchResults ?? musicTracks, [musicSearchResults, musicTracks]);
 
   const goTo = (next: Section) => {
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
@@ -545,6 +549,26 @@ function App() {
     const result = await requestFilmPlayback(film.id);
     if (!result.ok) openUnavailable(result.reason === 'failed' ? 'Не удалось открыть просмотр' : 'Источник онлайн-видео не подключён', result.message ?? 'Пока разрешённый видеопоток не настроен, фиктивная ссылка не открывается.', result.reason === 'failed' ? 'Ошибка backend' : 'Нужно подключить видеосервис');
     else if (result.url) setVideoUrl(result.url);
+  };
+
+  const handleTrailerAction = async (film: FilmItem) => {
+    if (film.source !== 'tmdb') {
+      openUnavailable('Трейлер недоступен', 'Для этой карточки не найден идентификатор TMDB.', 'Трейлер · TMDB');
+      return;
+    }
+    setTrailerBusy(true);
+    try {
+      const result = await requestTmdbTrailer(film.id);
+      if (!result.trailer) {
+        openUnavailable('Трейлер не найден', 'TMDB пока не возвращает для этого фильма подходящий трейлер YouTube.', 'TMDB · видео');
+        return;
+      }
+      setTrailer(result.trailer);
+    } catch (error) {
+      openUnavailable('Не удалось загрузить трейлер', error instanceof Error ? error.message : 'Попробуйте позже.', 'TMDB · видео');
+    } finally {
+      setTrailerBusy(false);
+    }
   };
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -769,7 +793,7 @@ function App() {
   );
 
   const renderMusic = () => {
-    const knownTracks = [...new Map([...openAudioTracks, ...musicTracks].map((track) => [track.id, track] as const)).values()];
+    const knownTracks = [...new Map(musicTracks.map((track) => [track.id, track] as const)).values()];
     const recentlyPlayedTracks = recentTrackIds.map((id) => knownTracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
     const displayTracks = filteredTracks;
 
@@ -830,6 +854,7 @@ function App() {
         {musicSearchBusy && <p className="music-provider-note" role="status">Ищем открытые аудиофайлы…</p>}
         {musicSearchError && <div className="music-search-error" role="alert">{musicSearchError}</div>}
         {renderTrackList(displayTracks)}
+        {!musicSearchBusy && !musicSearchError && !displayTracks.length && <div className="empty-state music-clean-slate"><div className="empty-icon"><Headphones size={22} /></div><h3>{musicMode === 'favorites' ? 'Избранных записей пока нет' : musicSearchResults === null ? 'Начните с чистого листа' : 'Записей пока нет'}</h3><p>{musicMode === 'favorites' ? 'Найдите аудиозапись и добавьте её в избранное.' : 'Встроенные и демонстрационные треки удалены. Найдите свободную запись по названию или исполнителю.'}</p></div>}
 
         <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>{recognitionStatus === 'available' ? 'Распознавание отправляет короткую запись на настроенный серверный сервис. Оно не означает, что найденную песню можно бесплатно воспроизводить.' : recognitionStatus === 'checking' ? 'Проверяем, подключён ли серверный сервис распознавания.' : recognitionStatus === 'not-configured' ? 'Сервис AudD не подключён. Микрофон не запрашивается; можно искать свободные записи в открытом архиве.' : 'Не удалось проверить серверный сервис. Распознавание пока недоступно; поиск аудиозаписей работает отдельно.'}</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy || recognitionStatus !== 'available'}>{recognitionBusy ? 'Слушаем…' : recognitionStatus === 'available' ? 'Распознать' : 'Недоступно'} <ChevronRight size={14} /></button></div>
         <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">История устройства</div><h2>Недавно слушали</h2></div><Tag>Только после начала воспроизведения</Tag></div>
@@ -842,7 +867,7 @@ function App() {
   const renderProfile = () => {
     const savedFilms = films.filter((film) => favorites.includes(film.id));
     const recentFilms = history.map((id) => films.find((film) => film.id === id)).filter((film): film is FilmItem => Boolean(film));
-    const savedTracks = [...new Map([...openAudioTracks, ...musicTracks].map((track) => [track.id, track] as const)).values()].filter((track) => musicFavorites.includes(track.id));
+    const savedTracks = [...new Map(musicTracks.map((track) => [track.id, track] as const)).values()].filter((track) => musicFavorites.includes(track.id));
     return (
       <section className="page-section profile-page">
         <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и открытые карточки. Избранное хранится на этом устройстве.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Профиль и настройки', 'Вход подтверждается сервером через Telegram initData. Избранное пока сохраняется локально, а не в аккаунте. Пароль Telegram не требуется.', 'Информация')} aria-label="Настройки"><Settings2 size={19} /></button></div>
@@ -867,6 +892,7 @@ function App() {
           <p>{film.description}</p>
           <div className="detail-actions">
             <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Ищем в Telegram…' : 'Отправить в бот'}</button>
+            {film.source === 'tmdb' && <button className="button button-glass" disabled={trailerBusy} onClick={() => void handleTrailerAction(film)}><Play size={15} fill="currentColor" /> {trailerBusy ? 'Ищем трейлер…' : 'Смотреть трейлер'}</button>}
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
           <div className="rights-note"><Info size={14} /> Используются только источники, которые разрешено распространять.</div>
@@ -935,6 +961,7 @@ function App() {
         {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`mobile-nav-item ${section === id && !selectedFilm ? 'mobile-nav-active' : ''}`} onClick={() => goTo(id)}><span className="mobile-icon-wrap"><Icon size={19} strokeWidth={section === id ? 2.3 : 1.8} /></span><span>{label}</span></button>)}
       </nav>
       {videoUrl && <div className="player-overlay" onClick={() => setVideoUrl(null)} role="presentation"><section className="player-modal video-modal" role="dialog" aria-modal="true" aria-label="Онлайн просмотр" onClick={(event) => event.stopPropagation()}><button className="player-close icon-button" onClick={() => setVideoUrl(null)} aria-label="Закрыть видео"><X size={19} /></button><Tag><Play size={13} fill="currentColor" /> КИНОВОЛНА · ОНЛАЙН</Tag><h2>{selectedFilm?.title ?? 'Видео'}</h2><video className="film-video" controls autoPlay playsInline src={videoUrl}>Ваш браузер не поддерживает видео.</video><p className="video-modal-note">Видеопоток отдается сервером через Telegram Bot API по временной защищённой ссылке.</p></section></div>}
+      {trailer && <div className="player-overlay" onClick={() => setTrailer(null)} role="presentation"><section className="player-modal video-modal trailer-modal" role="dialog" aria-modal="true" aria-label="Трейлер фильма" onClick={(event) => event.stopPropagation()}><button className="player-close icon-button" onClick={() => setTrailer(null)} aria-label="Закрыть трейлер"><X size={19} /></button><Tag><Play size={13} fill="currentColor" /> ТРЕЙЛЕР · TMDB</Tag><h2>{trailer.name || selectedFilm?.title || 'Трейлер'}</h2><iframe className="film-trailer-frame" src={`https://www.youtube-nocookie.com/embed/${trailer.key}?autoplay=1&rel=0`} title={trailer.name || `Трейлер: ${selectedFilm?.title ?? 'фильм'}`} allow="autoplay; encrypted-media; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><p className="video-modal-note">Трейлер воспроизводится встроенным плеером YouTube по данным TMDB. Ограничение Telegram на размер файла к этому потоку не применяется.</p><a className="trailer-source-link" href={`https://www.youtube.com/watch?v=${trailer.key}`} target="_blank" rel="noopener noreferrer">Открыть на YouTube</a></section></div>}
       {notice && <div className="modal-backdrop" onClick={() => setNotice(null)} role="presentation"><section className="notice-modal" role="dialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><button className="modal-close icon-button" onClick={() => setNotice(null)} aria-label="Закрыть"><X size={18} /></button><div className="modal-emblem"><Info size={20} /></div><span className="eyebrow">{notice.label ?? 'Информация'}</span><h2 id="notice-title">{notice.title}</h2><p>{notice.body}</p><button className="button button-primary modal-done" onClick={() => setNotice(null)}>Понятно <Check size={16} /></button></section></div>}
     </div>
   );

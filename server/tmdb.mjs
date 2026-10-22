@@ -56,6 +56,34 @@ export async function fetchTmdbWatchProviders(apiKey, mediaType, tmdbId) {
   return tmdbGet(`/${mediaType}/${tmdbId}/watch/providers`, apiKey);
 }
 
+export async function fetchTmdbTrailer(apiKey, mediaType, tmdbId) {
+  if (!['movie', 'tv'].includes(mediaType) || !Number.isSafeInteger(tmdbId) || tmdbId <= 0) {
+    throw new TypeError('Invalid TMDB trailer request');
+  }
+  const payload = await tmdbGet(`/${mediaType}/${tmdbId}/videos`, apiKey);
+  const candidates = (Array.isArray(payload?.results) ? payload.results : []).filter((item) =>
+    item?.site === 'YouTube'
+    && ['Trailer', 'Teaser'].includes(item.type)
+    && typeof item.key === 'string'
+    && /^[A-Za-z0-9_-]{11}$/.test(item.key),
+  );
+  candidates.sort((left, right) =>
+    Number(Boolean(right.official)) - Number(Boolean(left.official))
+      || Number(right.type === 'Trailer') - Number(left.type === 'Trailer')
+      || Number(right.iso_639_1 === 'ru') - Number(left.iso_639_1 === 'ru')
+      || String(right.published_at ?? '').localeCompare(String(left.published_at ?? '')),
+  );
+  const chosen = candidates[0];
+  if (!chosen) return null;
+  return {
+    key: chosen.key,
+    name: typeof chosen.name === 'string' ? chosen.name.trim().slice(0, 200) : '',
+    type: chosen.type,
+    official: chosen.official === true,
+    sourceUrl: `https://www.youtube.com/watch?v=${chosen.key}`,
+  };
+}
+
 export async function fetchTmdbCatalog(apiKey) {
   if (!apiKey) throw new Error('TMDB API key is not configured');
   const [movieGenres, ...moviePages] = await Promise.all([

@@ -249,6 +249,31 @@ export async function requestTmdbWatchProviders(filmId: string, region = 'UZ'): 
   return payload;
 }
 
+export type TmdbTrailer = {
+  key: string;
+  name: string;
+  type: 'Trailer' | 'Teaser';
+  official: boolean;
+  sourceUrl: string;
+};
+
+export async function requestTmdbTrailer(filmId: string): Promise<{ trailer: TmdbTrailer | null; attribution: string }> {
+  if (!/^tmdb-(movie|tv)-\d+$/.test(filmId)) {
+    throw new CatalogApiError(400, 'invalid_tmdb_id', 'Некорректный идентификатор фильма TMDB.');
+  }
+  const payload = await apiRequest<{ trailer: TmdbTrailer | null; attribution: string }>(`/api/catalog/${encodeURIComponent(filmId)}/trailer`);
+  if (payload.trailer) {
+    if (!/^[A-Za-z0-9_-]{11}$/.test(payload.trailer.key)
+      || !['Trailer', 'Teaser'].includes(payload.trailer.type)
+      || typeof payload.trailer.name !== 'string'
+      || typeof payload.trailer.official !== 'boolean'
+      || payload.trailer.sourceUrl !== `https://www.youtube.com/watch?v=${payload.trailer.key}`) {
+      throw new CatalogApiError(502, 'invalid_tmdb_trailer', 'TMDB вернул некорректные данные трейлера.');
+    }
+  }
+  return payload;
+}
+
 export type MusicRecognitionResult = {
   matched: boolean;
   track?: { artist: string | null; title: string | null; album: string | null; releaseDate: string | null; songLink: string | null };

@@ -142,13 +142,6 @@ export const films: Film[] = [
   },
 ];
 
-export const tracks: Track[] = [
-  { id: 'midnight', title: 'Полночь', artist: 'Sabo', album: 'Огни города', duration: '3:42', coverStyle: 'cover-moon', tone: 'Инди-поп', moods: ['love', 'road', 'sad'] },
-  { id: 'bluehour', title: 'Синий час', artist: 'Ravon', album: 'Тихая волна', duration: '4:08', coverStyle: 'cover-blue', tone: 'Электроника', moods: ['work', 'happy'] },
-  { id: 'distance', title: 'Расстояние', artist: 'Yulduz & Diyor', album: 'Дороги', duration: '3:26', coverStyle: 'cover-dusk', tone: 'Альтернатива', moods: ['road', 'love'] },
-  { id: 'quiet', title: 'В тишине', artist: 'Sabo', album: 'Ты не один', duration: '3:57', coverStyle: 'cover-green', tone: 'Инди-поп', moods: ['work', 'sad'] },
-];
-
 export const generatedArt = {
   hero: '/manus-storage/async-images/3lFoOyXSxcODIZnEWqMKJO/image-1.webp',
 };

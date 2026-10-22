@@ -192,6 +192,7 @@ function isMember(member) {
 
 function toFilm(row, posterUrl = null) {
   const numericMessageId = Number(row.message_id);
+  const storedPoster = typeof row.poster === 'string' && /^https:\/\//.test(row.poster) ? row.poster : null;
   return {
     id: row.id,
     title: row.title,
@@ -201,7 +202,7 @@ function toFilm(row, posterUrl = null) {
     genre: row.genre || 'Не указан',
     duration: 'Не указана',
     description: row.description || '',
-    poster: posterUrl || row.poster || '/favicon.svg',
+    poster: storedPoster || posterUrl || row.poster || '/favicon.svg',
     kind: row.kind === 'Сериал' ? 'Сериал' : 'Фильм',
     source: 'telegram',
     videoAvailable: Boolean(row.video_file_id),
@@ -446,7 +447,9 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function getFilmOr404(id, executor = pool) {
     if (!UUID_RE.test(id)) throw new RequestError(404, 'film_not_found', 'Фильм не найден.');
     const result = await executor.query(`
-      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
+      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind,
+        COALESCE(NULLIF(films.poster, '/favicon.svg'), (SELECT t.poster FROM tmdb_catalog t WHERE t.poster IS NOT NULL AND lower(regexp_replace(t.title, '[^[:alnum:]]+', '', 'g')) = lower(regexp_replace(films.title, '[^[:alnum:]]+', '', 'g')) ORDER BY CASE WHEN (films.kind = 'Сериал' AND t.media_type = 'tv') OR (films.kind <> 'Сериал' AND t.media_type = 'movie') THEN 0 ELSE 1 END, t.rating DESC LIMIT 1), films.poster) AS poster,
+        poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
       FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [id, config.telegramChannelId]);
@@ -980,7 +983,9 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const parameters = [config.telegramChannelId, q, limit, offset];
     const [films, count] = await Promise.all([
       pool.query(`
-        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
+        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind,
+          COALESCE(NULLIF(films.poster, '/favicon.svg'), (SELECT t.poster FROM tmdb_catalog t WHERE t.poster IS NOT NULL AND lower(regexp_replace(t.title, '[^[:alnum:]]+', '', 'g')) = lower(regexp_replace(films.title, '[^[:alnum:]]+', '', 'g')) ORDER BY CASE WHEN (films.kind = 'Сериал' AND t.media_type = 'tv') OR (films.kind <> 'Сериал' AND t.media_type = 'movie') THEN 0 ELSE 1 END, t.rating DESC LIMIT 1), films.poster) AS poster,
+          poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
         FROM films
         WHERE channel_id = $1::bigint AND message_id > 0 AND message_id <= 9007199254740991
           AND ($2 = '' OR title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')

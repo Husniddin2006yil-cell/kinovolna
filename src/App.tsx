@@ -33,7 +33,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, tracks, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadTelegramCatalog, openFilmInTelegram, requestFilmPlayback, type TelegramUser } from './telegram';
+import { getTelegramWebApp, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, type TelegramUser } from './telegram';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -255,6 +255,7 @@ function App() {
   const [recentTrackIds, setRecentTrackIds] = useState<string[]>([]);
   const [activeTrack, setActiveTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
+  const [recognitionBusy, setRecognitionBusy] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const [isSplashLeaving, setIsSplashLeaving] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
@@ -431,6 +432,41 @@ function App() {
     openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist} — пример каталога. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток. Сейчас этот экран не запускает музыку.`, 'Музыка · ждёт подключения');
   };
 
+  const handleMusicRecognition = async () => {
+    if (recognitionBusy) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      openUnavailable('Микрофон недоступен', 'Этот браузер или Telegram WebView не поддерживает запись с микрофона.', 'Нужна поддержка микрофона');
+      return;
+    }
+    let stream: MediaStream | null = null;
+    try {
+      setRecognitionBusy(true);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type)) ?? '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks: BlobPart[] = [];
+      const sample = await new Promise<Blob>((resolve, reject) => {
+        recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+        recorder.onerror = () => reject(new Error('Не удалось записать аудио.'));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+        recorder.start();
+        window.setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 8000);
+      });
+      const result = await recognizeMusicSample(sample);
+      if (!result.matched || !result.track) {
+        openUnavailable('Песня не найдена', 'AudD обработал запись, но совпадение не найдено. Попробуйте записать фрагмент громче и ближе к источнику.', 'Нет совпадения');
+      } else {
+        const track = result.track;
+        openUnavailable(track.title ?? 'Найден трек', `${track.artist ?? 'Исполнитель не указан'}${track.album ? ` · ${track.album}` : ''}${track.releaseDate ? ` · ${track.releaseDate}` : ''}${track.songLink ? `\n${track.songLink}` : ''}`, 'Результат AudD');
+      }
+    } catch (error) {
+      openUnavailable('Распознавание не выполнено', error instanceof Error ? error.message : 'Не удалось обработать запись.', 'Ошибка сервиса');
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      setRecognitionBusy(false);
+    }
+  };
+
   if (isSplashVisible) return <SplashScreen exiting={isSplashLeaving} onSkip={() => setIsSplashLeaving(true)} />;
 
   const renderFilmGrid = (items: FilmItem[]) => items.length ? (
@@ -557,7 +593,7 @@ function App() {
 
     return (
       <section className="page-section music-page">
-        <div className="music-welcome"><div className="music-welcome-copy"><div className="eyebrow"><span className="overline-dot" /> ПРОСТРАНСТВО ЗВУКА</div><h1>Найдите<br /><em>свой ритм.</em></h1><p>Выбирайте ритм, открывайте новых исполнителей и собирайте свою музыку.</p><button className="button button-primary" onClick={() => openUnavailable('Распознавание музыки в разработке', 'Микрофон и настоящий сервис распознавания пока не подключены. Случайные результаты не показываются.', 'Нужен настоящий сервис')}><Mic2 size={17} /> Распознать музыку <span className="button-live-dot" /></button></div><div className="music-visual"><div className="vinyl vinyl-back" /><div className="vinyl vinyl-front"><div className="vinyl-center"><AudioLines size={21} /></div></div><div className="music-visual-label"><Disc3 size={14} /> ИСТОЧНИК НЕ ПОДКЛЮЧЁН</div></div></div>
+        <div className="music-welcome"><div className="music-welcome-copy"><div className="eyebrow"><span className="overline-dot" /> ПРОСТРАНСТВО ЗВУКА</div><h1>Найдите<br /><em>свой ритм.</em></h1><p>Выбирайте ритм, открывайте новых исполнителей и собирайте свою музыку.</p><button className="button button-primary" onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}><Mic2 size={17} /> {recognitionBusy ? 'Слушаем фрагмент…' : 'Распознать музыку'} <span className="button-live-dot" /></button></div><div className="music-visual"><div className="vinyl vinyl-back" /><div className="vinyl vinyl-front"><div className="vinyl-center"><AudioLines size={21} /></div></div><div className="music-visual-label"><Disc3 size={14} /> AUDD · МИКРОФОН</div></div></div>
 
         <div className="music-toolbar"><div><div className="eyebrow">Выберите настроение</div><h2>Музыкальные волны</h2></div><Tag>Подборки-примеры</Tag></div>
         <div className="mood-grid">
@@ -578,7 +614,7 @@ function App() {
         <form className="large-search music-search" onSubmit={(event) => event.preventDefault()}><Search size={18} /><input value={musicQuery} onChange={(event) => setMusicQuery(event.target.value)} placeholder="Найти песню, альбом или исполнителя..." aria-label="Поиск музыки" /><button type="button" className="music-favorite-filter" onClick={() => setMusicMode((mode) => mode === 'all' ? 'favorites' : 'all')} aria-label="Переключить избранные треки"><Heart size={15} fill={musicMode === 'favorites' ? 'currentColor' : 'none'} /></button></form>
         <div className="music-list-toolbar"><div className="chip-row"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все треки</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}><Heart size={12} /> Избранное</button>{selectedMusicMood && <button className="filter-chip active" onClick={() => setSelectedMusicMood(null)}>Волна: {moodWaves.find((mood) => mood.id === selectedMusicMood)?.title ?? 'настроение'} <X size={12} /></button>}</div><span>{filteredTracks.length} треков</span></div>
         {renderTrackList(filteredTracks)}
-        <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Микрофон не используется, пока не подключён настоящий сервис распознавания.</span></div><button onClick={() => openUnavailable('Распознавание музыки в разработке', 'Понадобятся API-ключ и настоящий сервис распознавания. Пока нет ни записи с микрофона, ни выдуманных результатов.', 'Требуется подключение')}>Подробнее <ChevronRight size={14} /></button></div>
+        <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Запишем до 8 секунд с микрофона и отправим фрагмент в AudD. Результат появляется только при реальном совпадении.</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}>{recognitionBusy ? 'Слушаем…' : 'Распознать'} <ChevronRight size={14} /></button></div>
         <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">Ваша история</div><h2>Недавно слушали</h2></div><Tag>Демо · последние выборы</Tag></div>
         {recentlySelectedTracks.length ? renderTrackList(recentlySelectedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Выбранные треки появятся здесь. В прототипе это демо-история, а не подтверждённое воспроизведение.</span></div>}
         <p className="recent-music-note">После подключения разрешённого аудио здесь будут отображаться последние реально прослушанные песни.</p>

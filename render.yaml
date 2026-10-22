@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: TRUST_PROXY_HOPS
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: kinovolna-db
@@ -43,6 +45,8 @@ services:
       - key: TELEGRAM_CHANNEL_INVITE_URL
         sync: false
       - key: TMDB_API_KEY
+        sync: false
+      - key: AUDIO_RECOGNITION_API_KEY
         sync: false
 
 databases:

@@ -286,6 +286,43 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     skip: (request) => request.path === '/telegram/webhook',
     handler: (_request, response) => sendError(response, 429, 'rate_limited', 'Слишком много запросов. Попробуйте позже.'),
   }));
+  app.post('/api/music/recognize', express.raw({
+    type: (request) => Boolean(request.is('audio/*') || request.is('application/octet-stream')),
+    limit: '10mb',
+  }), asyncRoute(async (request, response) => {
+    if (!config.audioRecognitionApiKey) {
+      return sendError(response, 503, 'recognition_not_configured', 'Распознавание музыки не настроено: на сервере отсутствует API-ключ AudD.');
+    }
+    if (!Buffer.isBuffer(request.body) || request.body.length < 1024) {
+      return sendError(response, 400, 'audio_required', 'Отправьте короткую аудиозапись размером не менее 1 КБ.');
+    }
+    const form = new FormData();
+    form.append('api_token', config.audioRecognitionApiKey);
+    form.append('return', 'apple_music,spotify');
+    form.append('file', new Blob([request.body], { type: request.get('content-type') || 'audio/webm' }), 'kinovolna-sample.webm');
+    let providerResponse;
+    try {
+      providerResponse = await fetch('https://api.audd.io/', { method: 'POST', body: form, signal: AbortSignal.timeout(20_000) });
+    } catch {
+      return sendError(response, 502, 'recognition_unavailable', 'Сервис распознавания музыки временно недоступен.');
+    }
+    const payload = await providerResponse.json().catch(() => null);
+    if (!providerResponse.ok || !payload || payload.status !== 'success') {
+      return sendError(response, 502, 'recognition_failed', 'AudD не смог обработать запись. Проверьте API-ключ и формат аудио.');
+    }
+    if (!payload.result) return response.json({ matched: false });
+    const result = payload.result;
+    return response.json({
+      matched: true,
+      track: {
+        artist: typeof result.artist === 'string' ? result.artist : null,
+        title: typeof result.title === 'string' ? result.title : null,
+        album: typeof result.album === 'string' ? result.album : null,
+        releaseDate: typeof result.release_date === 'string' ? result.release_date : null,
+        songLink: typeof result.song_link === 'string' ? result.song_link : null,
+      },
+    });
+  }));
   app.use(express.json({ limit: '1mb', strict: true }));
 
   function needs(response, condition) {
@@ -505,6 +542,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     telegramConfigured: config.telegramConfigured,
     databaseConfigured: config.databaseConfigured,
     channelConfigured: config.channelConfigured,
+    audioRecognitionConfigured: Boolean(config.audioRecognitionApiKey),
   }));
 
   app.post('/api/telegram/auth', asyncRoute(async (request, response) => {

@@ -49,5 +49,8 @@ test('proxy trust is off by default and requires an explicit bounded configurati
   assert.equal(createApp({ config: plain }).get('trust proxy'), false);
   const trusted = readConfig({ TRUST_PROXY_HOPS: '1' });
   assert.equal(createApp({ config: trusted }).get('trust proxy'), 1);
+  const render = readConfig({ RENDER_EXTERNAL_URL: 'https://kinovolna.onrender.com' });
+  assert.equal(render.trustProxyHops, 1);
+  assert.equal(createApp({ config: render }).get('trust proxy'), 1);
   for (const value of ['true', '-1', '100', '*']) assert.equal(readConfig({ TRUST_PROXY_HOPS: value }).trustProxyHops, 0);
 });

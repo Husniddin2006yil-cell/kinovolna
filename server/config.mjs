@@ -122,7 +122,8 @@ export function readConfig(env = process.env) {
   const channelCandidate = nonEmpty(env.TELEGRAM_CHANNEL_ID);
   const channelInviteCandidate = nonEmpty(env.TELEGRAM_CHANNEL_INVITE_URL);
   const portCandidate = Number(env.PORT ?? 3001);
-  const proxyHopsCandidate = Number(env.TRUST_PROXY_HOPS ?? 0);
+  // Render places one trusted reverse proxy in front of the service. Keep local/dev strict.
+  const proxyHopsCandidate = Number(env.TRUST_PROXY_HOPS ?? (env.RENDER_EXTERNAL_URL ? 1 : 0));
 
   const channelInviteUrl = validHttpsUrl(channelInviteCandidate);
   const inviteIsTelegram = channelInviteUrl && /^https:\/\/t\.me\/(?:\+[^/?#]+|joinchat\/[^/?#]+)\/?$/.test(channelInviteUrl);
@@ -143,6 +144,7 @@ export function readConfig(env = process.env) {
     })(),
     telegramChannelInviteUrl: inviteIsTelegram ? channelInviteUrl : null,
     telegramInitDataMaxAge: parseMaxAge(env.TELEGRAM_INIT_DATA_MAX_AGE),
+    audioRecognitionApiKey: nonEmpty(env.AUDIO_RECOGNITION_API_KEY),
     publicBaseUrl: validPublicHttpsUrl(nonEmpty(env.PUBLIC_BASE_URL)),
     miniAppUrl: validPublicHttpsUrl(nonEmpty(env.MINI_APP_URL)),
     telegramConfigured: Boolean(botToken),

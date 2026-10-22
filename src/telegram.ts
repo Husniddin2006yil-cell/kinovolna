@@ -135,3 +135,27 @@ export async function requestFilmPlayback(filmId: string): Promise<FilmActionRes
     return { ok: false, reason: error instanceof CatalogApiError && error.code === 'video_source_not_configured' ? 'not-configured' : 'failed', message: error instanceof CatalogApiError ? error.message : 'Не удалось открыть источник видео.' };
   }
 }
+
+export type MusicRecognitionResult = {
+  matched: boolean;
+  track?: { artist: string | null; title: string | null; album: string | null; releaseDate: string | null; songLink: string | null };
+};
+
+export async function recognizeMusicSample(sample: Blob): Promise<MusicRecognitionResult> {
+  const headers = new Headers({ Accept: 'application/json', 'Content-Type': sample.type || 'audio/webm' });
+  const initData = getTelegramWebApp()?.initData;
+  if (initData) headers.set('X-Telegram-Init-Data', initData);
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/api/music/recognize`, {
+      method: 'POST', headers, body: sample, cache: 'no-store', signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new CatalogApiError(0, 'network_error', 'Сервис распознавания недоступен. Проверьте соединение.');
+  }
+  const payload = await response.json().catch(() => null) as (MusicRecognitionResult & { error?: { code?: string; message?: string } }) | null;
+  if (!response.ok || !payload) {
+    throw new CatalogApiError(response.status, payload?.error?.code ?? 'recognition_failed', payload?.error?.message ?? 'Не удалось распознать аудиозапись.');
+  }
+  return payload;
+}

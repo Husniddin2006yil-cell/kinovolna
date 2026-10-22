@@ -44,7 +44,7 @@ export async function startServer() {
     if (runtime.config.tmdbConfigured) {
       try {
         const { rows } = await runtime.pool.query('SELECT count(*)::int AS count FROM tmdb_catalog');
-        if (Number(rows[0]?.count ?? 0) === 0) {
+        if (Number(rows[0]?.count ?? 0) < 500) {
           const count = await syncTmdbCatalog(runtime.pool, runtime.config.tmdbApiKey);
           console.log(`Каталог TMDB загружен: ${count} записей.`);
         }

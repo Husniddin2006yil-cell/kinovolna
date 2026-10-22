@@ -60,12 +60,12 @@ export async function fetchTmdbCatalog(apiKey) {
   if (!apiKey) throw new Error('TMDB API key is not configured');
   const [movieGenres, ...moviePages] = await Promise.all([
     tmdbGet('/genre/movie/list', apiKey),
-    ...Array.from({ length: 10 }, (_, index) => tmdbGet(`/discover/movie?sort_by=popularity.desc&page=${index + 1}`, apiKey)),
+    ...Array.from({ length: 25 }, (_, index) => tmdbGet(`/discover/movie?sort_by=popularity.desc&page=${index + 1}`, apiKey)),
   ]);
   const movieGenreMap = new Map((movieGenres.genres ?? []).map((genre) => [Number(genre.id), String(genre.name)]));
   const all = moviePages.flatMap((page) => (page.results ?? []).map((item) => normalizeItem(item, 'movie', movieGenreMap)));
   const unique = new Map(all.filter((item) => Number.isSafeInteger(item.tmdbId) && item.tmdbId > 0 && item.title && item.poster).map((item) => [`movie:${item.tmdbId}`, item]));
-  return [...unique.values()].sort((a, b) => b.popularity - a.popularity).slice(0, 200);
+  return [...unique.values()].sort((a, b) => b.popularity - a.popularity).slice(0, 500);
 }
 
 /** Resolve one channel title to a TMDB poster without accepting a weak match. */

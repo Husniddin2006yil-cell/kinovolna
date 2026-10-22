@@ -7,6 +7,7 @@ export function useAppViewport() {
   useEffect(() => {
     const app = getTelegramWebApp();
     if (!app?.initData) return;
+    app.expand?.();
     let initialHeight: number | null = null;
     const update = () => {
       const visualHeight = window.visualViewport?.height || window.innerHeight;

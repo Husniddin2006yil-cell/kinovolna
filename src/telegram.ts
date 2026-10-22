@@ -16,6 +16,7 @@ type TelegramWebApp = {
   openTelegramLink?: (url: string) => void;
   openLink?: (url: string) => void;
   ready?: () => void;
+  expand?: () => void;
   initData?: string;
   viewportHeight?: number;
   viewportStableHeight?: number;

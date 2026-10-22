@@ -845,10 +845,19 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const kindClause = category === 'series' ? "AND media_type = 'tv'" : category === 'new' ? "AND media_type = 'movie'" : '';
     const orderClause = category === 'new' ? 'year DESC, rating DESC' : 'rating DESC, year DESC';
     const values = [q, limit, offset];
-    const where = `WHERE ($1 = '' OR title ILIKE '%' || $1 || '%' OR original_title ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%') ${kindClause}`;
+    const where = `WHERE ($1 = '' OR title ILIKE '%' || $1 || '%' OR original_title ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%') ${kindClause} AND poster IS NOT NULL`;
+    const dedup = `FROM (
+      SELECT tmdb_catalog.*, ROW_NUMBER() OVER (
+        PARTITION BY lower(regexp_replace(title, '[^[:alnum:]]+', '', 'g'))
+        ORDER BY rating DESC, year DESC, CASE WHEN media_type = 'movie' THEN 0 ELSE 1 END, tmdb_id
+      ) AS title_rank
+      FROM tmdb_catalog
+      ${where}
+    ) AS unique_titles
+    WHERE title_rank = 1`;
     const [items, count] = await Promise.all([
-      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, poster FROM tmdb_catalog ${where} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
-      pool.query(`SELECT COUNT(*)::bigint AS total FROM tmdb_catalog ${where}`, [q]),
+      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, poster ${dedup} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
+      pool.query(`SELECT COUNT(*)::bigint AS total ${dedup}`, [q]),
     ]);
     if (!Number(count.rows[0].total) && !q) throw new RequestError(503, 'catalog_not_synced', 'Каталог TMDB ещё не синхронизирован.');
     response.json({

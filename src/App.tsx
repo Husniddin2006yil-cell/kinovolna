@@ -73,6 +73,16 @@ function normalizeMovieTitle(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function uniqueMovieTitles(items: FilmItem[]): FilmItem[] {
+  const seen = new Set<string>();
+  return items.filter((film) => {
+    const key = normalizeMovieTitle(film.title) || film.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function findTelegramFilmMatch(film: FilmItem, candidates: FilmItem[]): FilmItem | null {
   const titles = new Set([film.title, film.originalTitle].map(normalizeMovieTitle).filter(Boolean));
   return candidates.find((candidate) =>
@@ -143,16 +153,13 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
       <button className="poster-button" onClick={openWithGlow} aria-label={`Подробнее: ${film.title}`}>
         <div className="poster-image-wrap">
           <img className="poster-image" src={film.poster} alt={`Обложка: ${film.title}`} loading="lazy" onError={(event) => { event.currentTarget.style.opacity = '0'; }} />
-          {film.badge && <span className={`poster-badge ${['Новинка', 'Премьера'].includes(film.badge) ? 'poster-badge-mint' : ''}`}>{film.badge}</span>}
           <span className="poster-play"><Play size={17} fill="currentColor" /></span>
           <span className="poster-shade" />
-          <span className="poster-rating"><Star size={12} fill="currentColor" /> {film.rating}</span>
         </div>
       </button>
       <div className="film-meta-row">
         <div className="film-meta-copy">
           <button className="film-title-button" onClick={openWithGlow}>{film.title}</button>
-          <span>{film.year || 'Год не указан'}<i />{film.genre}</span>
         </div>
         <button className={`icon-button favorite-button ${isFavorite ? 'is-favorite' : ''}`} onClick={onFavorite} aria-label={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}>
           <Heart size={17} fill={isFavorite ? 'currentColor' : 'none'} />
@@ -297,7 +304,7 @@ function App() {
     setTelegramUser(null);
     try {
       const result = await loadTelegramCatalog();
-      setFilms(result.films);
+      setFilms(uniqueMovieTitles(result.films));
       setTelegramUser(result.user);
       setCatalogMode(result.mode);
       setCatalogMessage(result.mode === 'tmdb'

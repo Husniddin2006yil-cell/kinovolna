@@ -33,7 +33,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, type TelegramUser } from './telegram';
+import { getTelegramWebApp, loadFilmDetail, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, type TelegramUser } from './telegram';
 import { MusicPlayer } from './components/MusicPlayer';
 import { useAppViewport } from './useAppViewport';
 import { openAudioTracks } from './open-audio';
@@ -442,6 +442,7 @@ function App() {
     setSelectedArtist(null);
     setHistory((current) => [film.id, ...current.filter((id) => id !== film.id)].slice(0, 4));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (film.source === 'telegram') void loadFilmDetail(film.id).then((detail) => setSelectedFilm((current) => current?.id === film.id ? { ...current, ...detail } : current)).catch(() => undefined);
   };
 
   const openUnavailable = (title: string, body: string, label = 'Интеграция не подключена') => setNotice({ title, body, label });
@@ -776,7 +777,7 @@ function App() {
           <div className="rights-note"><Info size={14} /> Используются только источники, которые разрешено распространять.</div>
         </div>
       </div>
-      {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Первый сезон</div><h2>Серии</h2></div><button className="sort-button">Сезон 1 <ChevronDown size={14} /></button></div><div className="episode-list">{film.episodes?.map((episode, index) => <button key={episode} className="episode-row" onClick={() => openUnavailable('Видео пока не подключено', 'Источник видео серии и интеграция с Telegram-ботом пока не настроены.')}><span className="episode-number">{String(index + 1).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{episode}</strong><span className="episode-runtime">42 мин</span><ChevronRight size={16} /></button>)}</div></section>}
+      {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Mavsumlar va qismlar</div><h2>Qismlar</h2></div><Tag>{film.episodes?.length ?? 0} ta mavjud</Tag></div><div className="episode-list">{film.episodes?.map((episode, index) => { const item = typeof episode === 'string' ? { id: film.id, title: episode, season: 1, number: index + 1, available: false } : episode; return <button key={`${item.id}-${item.number}`} className="episode-row" onClick={() => item.available ? void handleTelegramAction({ ...film, id: item.id, title: item.title }) : openUnavailable('Video topilmadi', 'Bu qism uchun Telegram xabari yoki video mavjud emas.')}><span className="episode-number">S{item.season} · E{String(item.number).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{item.title}</strong><span className="episode-runtime">{item.available ? 'Mavjud' : 'Topilmadi'}</span><ChevronRight size={16} /></button>; })}</div></section>}
       <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с публикацией канала. Защищённый просмотр доступен только для подходящих видеофайлов; большие файлы можно запросить через бота.' : film.source === 'tmdb' ? 'TMDB предоставляет метаданные. Доступность легальных сервисов проверяется через JustWatch; само видео открывается на выбранной площадке, если оно доступно в регионе UZ.' : 'Сейчас показан демонстрационный каталог без соответствующего поста в канале и без видеопотока.'}</span></div>
     </section>
   );

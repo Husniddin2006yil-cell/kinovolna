@@ -10,7 +10,7 @@ export type Film = {
   poster: string;
   badge?: string;
   kind: 'Фильм' | 'Сериал';
-  episodes?: string[];
+  episodes?: Array<string | { id: string; title: string; season: number; number: number; available: boolean }>;
   source?: 'telegram' | 'tmdb' | 'demo';
   videoAvailable?: boolean;
   videoSize?: number | null;
@@ -18,6 +18,12 @@ export type Film = {
   videoDuration?: number | null;
   channelId?: string;
   messageId?: number;
+  posterSource?: string | null;
+  posterSourceId?: string | null;
+  posterConfidence?: number | null;
+  seriesId?: string | null;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
 };
 
 export type Track = {

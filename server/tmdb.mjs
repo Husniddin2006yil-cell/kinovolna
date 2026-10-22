@@ -2,6 +2,10 @@ const TMDB_API_ROOT = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_ROOT = 'https://image.tmdb.org/t/p/w500';
 const TMDB_BACKDROP_ROOT = 'https://image.tmdb.org/t/p/w1280';
 
+function normalizeTitle(value) {
+  return String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+}
+
 function yearFrom(value) {
   const match = typeof value === 'string' ? value.match(/^(\d{4})/) : null;
   return match ? Number(match[1]) : 0;
@@ -67,6 +71,31 @@ export async function fetchTmdbCatalog(apiKey) {
   ];
   const unique = new Map(all.filter((item) => Number.isSafeInteger(item.tmdbId) && item.tmdbId > 0 && item.title).map((item) => [`${item.mediaType}:${item.tmdbId}`, item]));
   return [...unique.values()];
+}
+
+/** Resolve one channel title to a TMDB poster without accepting a weak match. */
+export async function matchTmdbPoster(apiKey, title, year = 0, kind = 'Фильм') {
+  if (!apiKey || typeof title !== 'string' || !title.trim()) throw new TypeError('A TMDB key and title are required');
+  const mediaTypes = kind === 'Сериал' ? ['tv', 'movie'] : ['movie', 'tv'];
+  const candidates = [];
+  for (const mediaType of mediaTypes) {
+    const payload = await tmdbGet(`/search/${mediaType}?query=${encodeURIComponent(title.trim())}${year ? `&year=${year}` : ''}&page=1`, apiKey);
+    for (const item of payload.results ?? []) {
+      if (!item?.poster_path) continue;
+      const names = [titleFor(item, mediaType), mediaType === 'tv' ? item.original_name : item.original_title].map(normalizeTitle).filter(Boolean);
+      const wanted = normalizeTitle(title);
+      const exact = names.includes(wanted);
+      const candidateYear = yearFrom(mediaType === 'tv' ? item.first_air_date : item.release_date);
+      const yearScore = year && candidateYear ? (year === candidateYear ? 0.25 : Math.abs(year - candidateYear) <= 1 ? 0.12 : -0.2) : 0;
+      const titleScore = exact ? 0.72 : names.some((name) => name.includes(wanted) || wanted.includes(name)) ? 0.48 : 0;
+      candidates.push({ item, mediaType, score: titleScore + yearScore + Math.min(0.08, Number(item.vote_average || 0) / 100) });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score < 0.55) return null;
+  const normalized = normalizeItem(best.item, best.mediaType, new Map());
+  return { ...normalized, confidence: Number(Math.min(0.999, best.score).toFixed(3)), source: 'tmdb' };
 }
 
 export async function syncTmdbCatalog(pool, apiKey) {

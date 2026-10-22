@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
-import { fetchTmdbWatchProviders } from './tmdb.mjs';
+import { fetchTmdbWatchProviders, matchTmdbPoster } from './tmdb.mjs';
 import { searchYoutubeMusic, YouTubeApiError } from './youtube.mjs';
 import { movieCopyOptions } from './movie-caption.mjs';
 
@@ -210,6 +210,12 @@ function toFilm(row, posterUrl = null) {
     videoDuration: Number.isInteger(row.video_duration) ? row.video_duration : Number(row.video_duration) || null,
     channelId: String(row.channel_id),
     messageId: Number.isSafeInteger(numericMessageId) ? numericMessageId : 0,
+    posterSource: row.poster_source || null,
+    posterSourceId: row.poster_source_id || null,
+    posterConfidence: row.poster_confidence === null || row.poster_confidence === undefined ? null : Number(row.poster_confidence),
+    seriesId: row.series_id || null,
+    seasonNumber: row.season_number === null || row.season_number === undefined ? null : Number(row.season_number),
+    episodeNumber: row.episode_number === null || row.episode_number === undefined ? null : Number(row.episode_number),
   };
 }
 
@@ -290,7 +296,11 @@ function parseImportItem(item, configuredChannelId) {
   const kind = item.kind === undefined ? 'Фильм' : item.kind;
   const poster = item.poster === undefined ? '/favicon.svg' : typeof item.poster === 'string' && item.poster.length <= 2048 && item.poster ? item.poster : null;
   if (!genre || !['Фильм', 'Сериал'].includes(kind) || !poster) throw new RequestError(400, 'invalid_import', 'Некорректные метаданные фильма.');
-  return { id: crypto.randomUUID(), title, description, channelId, messageId, year, genre, kind, poster };
+  const seriesTitle = typeof item.seriesTitle === 'string' && item.seriesTitle.trim() ? item.seriesTitle.trim().slice(0, 500) : null;
+  const seasonNumber = Number.isSafeInteger(item.seasonNumber) && item.seasonNumber >= 0 && item.seasonNumber <= 999 ? item.seasonNumber : null;
+  const episodeNumber = Number.isSafeInteger(item.episodeNumber) && item.episodeNumber >= 1 && item.episodeNumber <= 100000 ? item.episodeNumber : null;
+  if ((seasonNumber !== null) !== (episodeNumber !== null)) throw new RequestError(400, 'invalid_import', 'Mavsum va qism raqami birga berilishi kerak.');
+  return { id: crypto.randomUUID(), title, description, channelId, messageId, year, genre, kind, poster, seriesTitle, seasonNumber, episodeNumber };
 }
 
 function asyncRoute(handler) {
@@ -436,7 +446,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function getFilmOr404(id, executor = pool) {
     if (!UUID_RE.test(id)) throw new RequestError(404, 'film_not_found', 'Фильм не найден.');
     const result = await executor.query(`
-      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
+      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
       FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [id, config.telegramChannelId]);
@@ -518,13 +528,29 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     });
   }
 
-  async function sendFilmToPrivateChat(chatId, film) {
+  async function sendFilmToPrivateChat(client, chatId, film) {
     // Imported historical rows may not have a file_id, but copyMessage can still
     // copy the original channel message by chat_id + message_id. Playback remains
     // disabled until a real video_file_id is indexed.
     if (film.message_id && film.channel_id) {
       try {
-        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, movieCopyOptions(film.title));
+        const options = movieCopyOptions(film.title);
+        if (client && !film.series_id) {
+          const metadata = await client.query('SELECT series_id, season_number, episode_number FROM films WHERE id = $1', [film.id]);
+          Object.assign(film, metadata.rows[0] || {});
+        }
+        if (client && film.series_id) {
+          const siblings = await client.query(`SELECT f.id, f.title, f.channel_id, f.message_id, f.season_number, f.episode_number
+            FROM films f WHERE f.series_id = $1 AND f.message_id > 0 ORDER BY f.season_number NULLS LAST, f.episode_number NULLS LAST, f.title`, [film.series_id]);
+          const index = siblings.rows.findIndex((item) => item.id === film.id);
+          const previous = index > 0 ? siblings.rows[index - 1] : null;
+          const next = index >= 0 && index < siblings.rows.length - 1 ? siblings.rows[index + 1] : null;
+          const row = [];
+          if (previous) row.push({ text: '⬅️ Oldingi qism', callback_data: `episode_${previous.id}` });
+          if (next) row.push({ text: '➡️ Keyingi qism', callback_data: `episode_${next.id}` });
+          if (siblings.rows.length > 1) options.reply_markup = { inline_keyboard: [...(row.length ? [row] : []), [{ text: '📋 Qismlar ro‘yxati', callback_data: `episode_list_${film.series_id}` }]] };
+        }
+        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, options);
         return;
       } catch {
         await telegramClient.sendMessage(chatId, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
@@ -575,7 +601,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       return;
     }
     if (films.length === 1) {
-      await sendFilmToPrivateChat(chatId, films[0]);
+      await sendFilmToPrivateChat(client, chatId, films[0]);
       return;
     }
     const visibleFilms = films.slice(0, 8);
@@ -610,7 +636,26 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       await telegramClient.sendMessage(chatId, 'Фильм не найден или больше недоступен.');
       return;
     }
-    await sendFilmToPrivateChat(chatId, result.rows[0]);
+    await sendFilmToPrivateChat(client, chatId, result.rows[0]);
+  }
+
+  async function processEpisodeCallback(client, callback) {
+    const userId = callback?.from?.id;
+    const chatId = callback?.message?.chat?.id;
+    const data = typeof callback?.data === 'string' ? callback.data : '';
+    const episodeMatch = data.match(/^episode_([0-9a-f-]{36})$/i);
+    const listMatch = data.match(/^episode_list_([0-9a-f-]{36})$/i);
+    if (!Number.isSafeInteger(userId) || userId <= 0 || String(chatId) !== String(userId) || callback?.message?.chat?.type !== 'private' || (!episodeMatch && !listMatch)) return;
+    await telegramClient.call('answerCallbackQuery', { callback_query_id: callback.id });
+    if (!client || !pool || !config.databaseConfigured || !config.channelConfigured || !await requireBotChatMember({ chat: callback.message.chat, from: callback.from })) return;
+    if (listMatch) {
+      const rows = await client.query(`SELECT f.id, f.title, f.season_number, f.episode_number FROM films f WHERE f.series_id = $1 ORDER BY f.season_number, f.episode_number`, [listMatch[1]]);
+      if (!rows.rows.length) return telegramClient.sendMessage(chatId, 'Qismlar ro‘yxati topilmadi.');
+      return telegramClient.sendMessage(chatId, '📋 Qismlar ro‘yxati:', { reply_markup: { inline_keyboard: rows.rows.slice(0, 50).map((row) => [{ text: `${row.season_number ? `S${row.season_number} ` : ''}${row.episode_number ? `E${row.episode_number} ` : ''}${String(row.title).slice(0, 45)}`, callback_data: `episode_${row.id}` }]) } });
+    }
+    const result = await client.query(`SELECT id, title, channel_id, message_id, channel_username, video_file_id, series_id, season_number, episode_number FROM films WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0`, [episodeMatch[1], config.telegramChannelId]);
+    if (!result.rows[0]) return telegramClient.sendMessage(chatId, 'Bu qism topilmadi yoki mavjud emas.');
+    await sendFilmToPrivateChat(client, chatId, result.rows[0]);
   }
 
   async function processMembershipRecheck(callback) {
@@ -700,7 +745,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       await telegramClient.sendMessage(message.chat.id, 'Фильм не найден или больше недоступен.');
       return;
     }
-    await sendFilmToPrivateChat(message.chat.id, row);
+    await sendFilmToPrivateChat(client, message.chat.id, row);
   }
 
   async function processAdminCallback(client, callback) {
@@ -926,7 +971,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const parameters = [config.telegramChannelId, q, limit, offset];
     const [films, count] = await Promise.all([
       pool.query(`
-        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
+        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_source, poster_source_id, poster_confidence, series_id, season_number, episode_number, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
         FROM films
         WHERE channel_id = $1::bigint AND message_id > 0 AND message_id <= 9007199254740991
           AND ($2 = '' OR title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')
@@ -1041,7 +1086,14 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     await authenticateMember(request, response);
     if (response.headersSent) return;
     const film = await getFilmOr404(request.params.id);
-    response.json(toFilm(film, posterProxyUrl(film)));
+    const episodes = film.series_id
+      ? await pool.query(`SELECT e.id, e.episode_number, e.title, s.season_number, f.id AS film_id, f.title AS film_title, f.video_file_id
+          FROM episodes e JOIN seasons s ON s.id = e.season_id JOIN films f ON f.id = e.film_id
+          WHERE s.series_id = $1 ORDER BY s.season_number, e.episode_number`, [film.series_id])
+      : { rows: [] };
+    response.json({ ...toFilm(film, posterProxyUrl(film)), episodes: episodes.rows.map((episode) => ({
+      id: episode.film_id, title: episode.title || episode.film_title, season: Number(episode.season_number), number: Number(episode.episode_number), available: Boolean(episode.video_file_id),
+    })) });
   }));
 
   app.post('/api/admin/films/import', asyncRoute(async (request, response) => {
@@ -1054,15 +1106,44 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     await withTransaction(async (client) => {
       for (const item of parsedItems) {
         await client.query(`
-          INSERT INTO films (id, title, description, channel_id, message_id, year, genre, kind, poster)
-          VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7, $8, $9)
+          INSERT INTO films (id, title, description, channel_id, message_id, year, genre, kind, poster, season_number, episode_number)
+          VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (channel_id, message_id) DO UPDATE SET
             title = EXCLUDED.title, description = EXCLUDED.description, year = EXCLUDED.year,
-            genre = EXCLUDED.genre, kind = EXCLUDED.kind, poster = EXCLUDED.poster, updated_at = now()
-        `, [item.id, item.title, item.description, item.channelId, item.messageId, item.year, item.genre, item.kind, item.poster]);
+            genre = EXCLUDED.genre, kind = EXCLUDED.kind, poster = CASE WHEN films.poster_source IS NULL THEN EXCLUDED.poster ELSE films.poster END,
+            season_number = EXCLUDED.season_number, episode_number = EXCLUDED.episode_number, updated_at = now()
+        `, [item.id, item.title, item.description, item.channelId, item.messageId, item.year, item.genre, item.kind, item.poster, item.seasonNumber, item.episodeNumber]);
+        if (item.seriesTitle && item.seasonNumber !== null) {
+          const normalized = item.seriesTitle.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+          const series = await client.query(`INSERT INTO series (id, title, normalized_title, year, description) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (normalized_title) DO UPDATE SET updated_at = now() RETURNING id`, [crypto.randomUUID(), item.seriesTitle, normalized, item.year, item.description]);
+          const seriesId = series.rows[0].id;
+          const season = await client.query(`INSERT INTO seasons (id, series_id, season_number, title) VALUES ($1, $2, $3, $4) ON CONFLICT (series_id, season_number) DO UPDATE SET title = EXCLUDED.title RETURNING id`, [crypto.randomUUID(), seriesId, item.seasonNumber, `Season ${item.seasonNumber}`]);
+          await client.query('UPDATE films SET series_id = $1 WHERE channel_id = $2::bigint AND message_id = $3::bigint', [seriesId, item.channelId, item.messageId]);
+          await client.query(`INSERT INTO episodes (id, season_id, film_id, episode_number, title) SELECT $1, $2, f.id, $3, f.title FROM films f WHERE f.channel_id = $4::bigint AND f.message_id = $5::bigint ON CONFLICT (film_id) DO UPDATE SET season_id = EXCLUDED.season_id, episode_number = EXCLUDED.episode_number, title = EXCLUDED.title`, [crypto.randomUUID(), season.rows[0].id, item.episodeNumber, item.channelId, item.messageId]);
+        }
       }
     });
     response.json({ imported: parsedItems.length });
+  }));
+
+  app.post('/api/admin/posters/sync', asyncRoute(async (request, response) => {
+    if (!needs(response, Boolean(pool && config.databaseConfigured && config.telegramConfigured && config.channelConfigured && config.tmdbApiKey))) return;
+    const auth = authenticate(request);
+    if (!config.telegramAdminIds.has(String(auth.user.id))) throw new RequestError(403, 'admin_required', 'Недостаточно прав.');
+    const limit = Math.min(100, Math.max(1, Number(request.body?.limit || 25)));
+    const result = await pool.query(`SELECT id, title, year, kind FROM films WHERE channel_id = $1::bigint AND (poster_source IS NULL OR poster_source <> 'tmdb') ORDER BY created_at LIMIT $2`, [config.telegramChannelId, limit]);
+    const report = { checked: result.rows.length, matched: 0, unmatched: [], errors: [] };
+    for (const film of result.rows) {
+      try {
+        const match = await matchTmdbPoster(config.tmdbApiKey, film.title, Number(film.year) || 0, film.kind);
+        if (!match) { report.unmatched.push({ id: film.id, title: film.title, year: Number(film.year) || 0 }); continue; }
+        await pool.query(`UPDATE films SET poster = $1, poster_source = 'tmdb', poster_source_id = $2, poster_confidence = $3, poster_checked_at = now(), updated_at = now() WHERE id = $4 AND channel_id = $5::bigint`, [match.poster, `${match.mediaType}:${match.tmdbId}`, match.confidence, film.id, config.telegramChannelId]);
+        report.matched += 1;
+      } catch (error) {
+        report.errors.push({ id: film.id, title: film.title, message: String(error?.message || 'TMDB error').slice(0, 160) });
+      }
+    }
+    response.json(report);
   }));
 
   app.post('/api/telegram/webhook', asyncRoute(async (request, response) => {
@@ -1112,6 +1193,8 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       if (update.callback_query) {
         if (typeof update.callback_query.data === 'string' && update.callback_query.data.startsWith('filmselect_')) {
           await processFilmSelection(client, update.callback_query);
+        } else if (typeof update.callback_query.data === 'string' && update.callback_query.data.startsWith('episode_')) {
+          await processEpisodeCallback(client, update.callback_query);
         } else if (update.callback_query.data === 'membership_recheck') {
           await processMembershipRecheck(update.callback_query);
         } else {

@@ -10,9 +10,9 @@ export function useAppViewport() {
     let initialHeight: number | null = null;
     const update = () => {
       const visualHeight = window.visualViewport?.height || window.innerHeight;
-      const currentHeight = app.viewportHeight || visualHeight;
+      const currentHeight = app.viewportStableHeight || app.viewportHeight || visualHeight;
       const measured = Math.round(Math.min(visualHeight, currentHeight));
-      if (initialHeight === null) initialHeight = measured;
+      if (initialHeight === null || measured > initialHeight + 80) initialHeight = measured;
       const visible = Math.min(initialHeight, measured);
       setHeight(visible);
       document.documentElement.style.setProperty('--app-viewport-height', `${visible}px`);

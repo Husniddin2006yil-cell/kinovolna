@@ -156,6 +156,10 @@ export async function searchTelegramFilms(query: string): Promise<Film[]> {
   return Array.isArray(payload.items) ? payload.items : [];
 }
 
+export async function loadFilmDetail(filmId: string): Promise<Film> {
+  return apiRequest<Film>(`/api/films/${encodeURIComponent(filmId)}`);
+}
+
 export type WatchProvidersResponse = {
   provider: string;
   region: string;

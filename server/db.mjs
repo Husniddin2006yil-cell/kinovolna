@@ -36,6 +36,53 @@ export async function migrate(pool) {
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_duration integer');
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_file_id text');
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS media_group_id text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS series_id uuid');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS season_number integer');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS episode_number integer');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_source text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_source_id text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_checked_at timestamptz');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_confidence numeric(4,3)');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS series (
+        id uuid PRIMARY KEY,
+        title text NOT NULL,
+        normalized_title text NOT NULL UNIQUE,
+        year integer NOT NULL DEFAULT 0,
+        description text NOT NULL DEFAULT '',
+        poster text,
+        poster_source text,
+        poster_source_id text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS seasons (
+        id uuid PRIMARY KEY,
+        series_id uuid NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+        season_number integer NOT NULL CHECK (season_number >= 0),
+        title text NOT NULL DEFAULT '',
+        UNIQUE (series_id, season_number)
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS episodes (
+        id uuid PRIMARY KEY,
+        season_id uuid NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+        film_id uuid NOT NULL UNIQUE REFERENCES films(id) ON DELETE CASCADE,
+        episode_number integer NOT NULL CHECK (episode_number >= 1),
+        title text NOT NULL DEFAULT '',
+        UNIQUE (season_id, episode_number)
+      )
+    `);
+    await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'films_series_fk') THEN
+        ALTER TABLE films ADD CONSTRAINT films_series_fk FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE SET NULL NOT VALID;
+      END IF;
+    END $$`);
+    await client.query('CREATE INDEX IF NOT EXISTS films_series_episode_idx ON films (series_id, season_number, episode_number)');
+    await client.query('CREATE INDEX IF NOT EXISTS episodes_order_idx ON episodes (season_id, episode_number)');
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS films_channel_media_group_unique ON films (channel_id, media_group_id) WHERE media_group_id IS NOT NULL');
     await client.query(`
       CREATE TABLE IF NOT EXISTS tmdb_catalog (

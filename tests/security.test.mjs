@@ -82,6 +82,44 @@ test('unconfigured API is honest, protected, JSON-only and does not expose secre
   assert.match(unknown.headers.get('content-type'), /application\/json/);
 });
 
+test('music recognition preserves the real audio container and maps AudD errors safely', async (t) => {
+  const server = createApp({ config: readConfig({ AUDIO_RECOGNITION_API_KEY: 'server-only-test-token' }), pool: null, telegram: null }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const realFetch = globalThis.fetch;
+  const warnings = [];
+  const originalWarn = console.warn;
+  const webm = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(2048, 7)]);
+  let uploaded;
+  globalThis.fetch = async (input, init) => {
+    if (String(input) !== 'https://api.audd.io/') return realFetch(input, init);
+    uploaded = init.body.get('file');
+    return new Response(JSON.stringify({ status: 'success', result: { artist: 'Test Artist', title: 'Test Song' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  console.warn = (...args) => warnings.push(args);
+  t.after(() => { globalThis.fetch = realFetch; console.warn = originalWarn; });
+
+  const success = await fetch(`${base}/api/music/recognize`, { method: 'POST', headers: { 'Content-Type': 'audio/webm;codecs=opus' }, body: webm });
+  assert.equal(success.status, 200);
+  assert.equal(uploaded.name, 'kinovolna-sample.webm');
+  assert.equal(uploaded.type, 'audio/webm');
+  assert.equal((await success.json()).matched, true);
+
+  for (const [code, message] of [['900', 'Ключ AudD'], ['902', 'Ключ AudD'], ['700', 'корректный аудиофайл'], ['500', 'прочитать аудиофайл'], ['300', 'слишком короткий']]) {
+    globalThis.fetch = async (input, init) => {
+      if (String(input) !== 'https://api.audd.io/') return realFetch(input, init);
+      return new Response(JSON.stringify({ status: 'error', error: { error_code: code, error_message: `provider detail ${code}` } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const response = await fetch(`${base}/api/music/recognize`, { method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: webm });
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).error.message, new RegExp(message));
+    assert.equal(warnings.at(-1)[1].error_code, code);
+    assert.equal(warnings.at(-1)[1].error_message, `provider detail ${code}`);
+    assert.doesNotMatch(JSON.stringify(warnings.at(-1)), /server-only-test-token/);
+  }
+});
+
 test('configured auth endpoint verifies signed body without trusting user JSON', async (t) => {
   const server = createApp({ config: readConfig(testEnvironment()), telegram: {} }).listen(0, '127.0.0.1');
   await once(server, 'listening');

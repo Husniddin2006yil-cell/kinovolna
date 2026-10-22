@@ -27,6 +27,28 @@ function sendError(response, status, code, message) {
   return response.status(status).json({ error: { code, message } });
 }
 
+function safeProviderText(value) {
+  return String(value ?? 'unknown')
+    .replace(/(api[_-]?token|authorization|bearer)[=: ]+[^\s,;]+/gi, '$1=[redacted]')
+    .slice(0, 300);
+}
+
+function audioUploadDescriptor(contentType, body) {
+  const mime = String(contentType || '').split(';', 1)[0].trim().toLowerCase();
+  const has = (offset, ...bytes) => bytes.every((byte, index) => body[offset + index] === byte);
+  const descriptors = {
+    'audio/webm': { extension: 'webm', valid: has(0, 0x1a, 0x45, 0xdf, 0xa3) },
+    'audio/mp4': { extension: 'mp4', valid: body.length > 12 && body.subarray(4, 8).toString('ascii') === 'ftyp' },
+    'audio/x-m4a': { extension: 'm4a', valid: body.length > 12 && body.subarray(4, 8).toString('ascii') === 'ftyp' },
+    'audio/ogg': { extension: 'ogg', valid: body.subarray(0, 4).toString('ascii') === 'OggS' },
+    'audio/wav': { extension: 'wav', valid: body.length > 12 && body.subarray(0, 4).toString('ascii') === 'RIFF' && body.subarray(8, 12).toString('ascii') === 'WAVE' },
+    'audio/mpeg': { extension: 'mp3', valid: body.subarray(0, 3).toString('ascii') === 'ID3' || (body[0] === 0xff && (body[1] & 0xe0) === 0xe0) },
+  };
+  const descriptor = descriptors[mime];
+  if (!descriptor || !descriptor.valid || !body.some((byte) => byte !== 0)) return null;
+  return { ...descriptor, mime };
+}
+
 function safeEqualText(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const leftBuffer = Buffer.from(left, 'utf8');
@@ -296,10 +318,14 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     if (!Buffer.isBuffer(request.body) || request.body.length < 1024) {
       return sendError(response, 400, 'audio_required', 'Отправьте короткую аудиозапись размером не менее 1 КБ.');
     }
+    const descriptor = audioUploadDescriptor(request.get('content-type'), request.body);
+    if (!descriptor) {
+      return sendError(response, 415, 'audio_invalid', 'Формат аудиозаписи не распознан. Используйте запись WebM, MP4, OGG, WAV или MP3.');
+    }
     const form = new FormData();
     form.append('api_token', config.audioRecognitionApiKey);
     form.append('return', 'apple_music,spotify');
-    form.append('file', new Blob([request.body], { type: request.get('content-type') || 'audio/webm' }), 'kinovolna-sample.webm');
+    form.append('file', new Blob([request.body], { type: descriptor.mime }), `kinovolna-sample.${descriptor.extension}`);
     let providerResponse;
     try {
       providerResponse = await fetch('https://api.audd.io/', { method: 'POST', body: form, signal: AbortSignal.timeout(20_000) });
@@ -308,7 +334,18 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
     const payload = await providerResponse.json().catch(() => null);
     if (!providerResponse.ok || !payload || payload.status !== 'success') {
-      return sendError(response, 502, 'recognition_failed', 'AudD не смог обработать запись. Проверьте API-ключ и формат аудио.');
+      const providerError = payload?.error ?? payload;
+      const errorCode = safeProviderText(providerError?.error_code ?? providerError?.code ?? payload?.error_code ?? payload?.code ?? 'unknown');
+      const errorMessage = safeProviderText(providerError?.error_message ?? providerError?.message ?? payload?.error_message ?? payload?.message ?? 'unknown');
+      console.warn('[music] AudD recognition failed', { http_status: providerResponse.status, error_code: errorCode, error_message: errorMessage, mime: descriptor.mime, extension: descriptor.extension, bytes: request.body.length });
+      const clientMessage = {
+        '900': 'Ключ AudD не принят или закончился лимит бесплатных запросов.',
+        '902': 'Ключ AudD недействителен. Проверьте серверную настройку API-ключа.',
+        '700': 'AudD не получил корректный аудиофайл. Повторите запись ещё раз.',
+        '500': 'AudD не смог прочитать аудиофайл. Попробуйте записать фрагмент в другом браузере.',
+        '300': 'Фрагмент слишком короткий для распознавания. Запишите музыку не менее нескольких секунд.',
+      }[errorCode] ?? 'AudD не смог обработать запись. Проверьте аудио и настройки сервиса.';
+      return sendError(response, 502, 'recognition_failed', clientMessage);
     }
     if (!payload.result) return response.json({ matched: false });
     const result = payload.result;

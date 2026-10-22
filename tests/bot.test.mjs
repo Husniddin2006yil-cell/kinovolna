@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { createHmac } from 'node:crypto';
 import { createApp } from '../server/app.mjs';
 import { readConfig } from '../server/config.mjs';
-import { testEnvironment, testUser, testWebhookSecret } from './helpers.mjs';
+import { signInitData, testBotToken, testEnvironment, testUser, testWebhookSecret } from './helpers.mjs';
 
 const welcome = 'Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?';
 
@@ -29,14 +30,20 @@ function createTelegramStub({ membership = 'administrator' } = {}) {
       },
       getMe: async () => ({ id: 900001, username: 'kinovolna_test_bot' }),
       getChatMember: async () => ({ status: membership }),
+      getFile: async (fileId) => {
+        calls.push({ method: 'getFile', parameters: { file_id: fileId } });
+        return { file_path: 'photos/poster.jpg' };
+      },
     },
   };
 }
 
 function createPool(filmCount = '0', films = []) {
+  const statements = [];
   const client = {
     async query(sql, parameters = []) {
       const statement = String(sql).replace(/\s+/g, ' ').trim();
+      statements.push({ statement, parameters });
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) return { rows: [] };
       if (statement.startsWith('INSERT INTO telegram_updates')) return { rows: [{ update_id: parameters[0] }] };
       if (statement.includes('position(lower($2) in lower(title))')) {
@@ -46,6 +53,12 @@ function createPool(filmCount = '0', films = []) {
       if (statement.startsWith('SELECT id, title, year, kind, channel_id, message_id, channel_username, video_file_id FROM films WHERE id = $1')) {
         return { rows: films.filter((film) => film.id === parameters[0] && film.channel_id === parameters[1]) };
       }
+      if (statement.startsWith('SELECT id, title, description, channel_id, message_id, channel_username, source_date, year') && statement.includes('WHERE channel_id = $1::bigint')) {
+        return { rows: films.filter((film) => film.channel_id === parameters[0]) };
+      }
+      if (statement.startsWith('SELECT id, title, description, channel_id, message_id, channel_username, source_date') && statement.includes('WHERE id = $1')) {
+        return { rows: films.filter((film) => film.id === parameters[0] && film.channel_id === parameters[1]) };
+      }
       if (statement.includes('SELECT COUNT(*)::bigint AS total')) return { rows: [{ total: filmCount }] };
       if (statement.includes('SELECT COUNT(*)::bigint AS films')) return { rows: [{ films: filmCount }] };
       if (statement === 'SELECT 1') return { rows: [{ '?column?': 1 }] };
@@ -53,16 +66,17 @@ function createPool(filmCount = '0', films = []) {
     },
     release() {},
   };
-  return { connect: async () => client, query: client.query.bind(client) };
+  return { statements, connect: async () => client, query: client.query.bind(client) };
 }
 
 async function serve(t, { environment = {}, pool = null, membership = 'administrator' } = {}) {
   const telegram = createTelegramStub({ membership });
-  const config = readConfig(testEnvironment(environment));
+  const config = readConfig(testEnvironment({ PUBLIC_BASE_URL: 'https://kinovolna-test.app', ...environment }));
   const server = createApp({ config, pool, telegram: telegram.client }).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  return { base: `http://127.0.0.1:${server.address().port}`, ...telegram };
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return { base, ...telegram };
 }
 
 async function deliver(base, update) {
@@ -260,6 +274,67 @@ test('subscription prompt links to the channel and rechecks membership from a pr
   assert.equal((await deliver(base, callbackUpdate(26, testUser, 'membership_recheck'))).status, 200);
   assert.match(sent.at(-1).text, /Подписка подтверждена/);
   assert.ok(calls.some((call) => call.method === 'answerCallbackQuery'));
+});
+
+test('channel media-group updates retain both the movie caption and Telegram poster/video IDs', async (t) => {
+  const pool = createPool();
+  const { base } = await serve(t, { pool });
+  const date = Math.floor(Date.now() / 1000);
+  const photoUpdate = {
+    update_id: 30,
+    channel_post: {
+      message_id: 30, date, chat: { id: '-1001234567890', type: 'channel' },
+      media_group_id: 'media-group-30', caption: 'The Example Film\nDescription',
+      photo: [{ file_id: 'poster-small' }, { file_id: 'poster-large' }],
+    },
+  };
+  const videoUpdate = {
+    update_id: 31,
+    channel_post: {
+      message_id: 31, date, chat: { id: '-1001234567890', type: 'channel' },
+      media_group_id: 'media-group-30', video: { file_id: 'video-file', thumbnail: { file_id: 'video-thumbnail' }, file_size: 1200 },
+    },
+  };
+  assert.equal((await deliver(base, photoUpdate)).status, 200);
+  assert.equal((await deliver(base, videoUpdate)).status, 200);
+  const writes = pool.statements.filter(({ statement }) => statement.startsWith('INSERT INTO films'));
+  assert.equal(writes.length, 2);
+  assert.ok(writes.every(({ statement }) => statement.includes('ON CONFLICT (channel_id, media_group_id)')));
+  assert.equal(writes[0].parameters[1], 'The Example Film');
+  assert.equal(writes[0].parameters[12], 'poster-large');
+  assert.equal(writes[0].parameters[13], 'media-group-30');
+  assert.equal(writes[1].parameters[8], 'video-file');
+  assert.equal(writes[1].parameters[12], 'video-thumbnail');
+});
+
+test('film API returns a signed poster proxy and never exposes Telegram file URLs', async (t) => {
+  const film = { ...botFilm('11111111-1111-4111-8111-111111111111', 'Interstellar', 46), poster_file_id: 'poster-private-file', poster: '/favicon.svg' };
+  const { base, calls } = await serve(t, { pool: createPool('1', [film]) });
+  const auth = { 'X-Telegram-Init-Data': signInitData() };
+  const listing = await fetch(`${base}/api/films`, { headers: auth });
+  assert.equal(listing.status, 200);
+  const body = await listing.json();
+  const poster = new URL(body.items[0].poster);
+  assert.equal(poster.pathname, `/api/films/${film.id}/poster`);
+  assert.ok(poster.searchParams.get('token'));
+  assert.doesNotMatch(body.items[0].poster, /api\.telegram\.org|bot\d+:/);
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input) === `https://api.telegram.org/file/bot${testBotToken}/photos/poster.jpg`) {
+      return new Response(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '4' } });
+    }
+    return realFetch(input, init);
+  };
+  t.after(() => { globalThis.fetch = realFetch; });
+  const denied = await fetch(`${base}/api/films/${film.id}/poster?token=invalid`);
+  assert.equal(denied.status, 401);
+  const image = await fetch(`${base}${poster.pathname}${poster.search}`);
+  assert.equal(image.status, 200);
+  assert.match(image.headers.get('content-type'), /image\/jpeg/);
+  assert.equal(image.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
+  assert.ok(calls.some((call) => call.method === 'getFile' && call.parameters.file_id === 'poster-private-file'));
 });
 
 test('admin statistics report a real catalog count and do not call it view/search analytics', async (t) => {

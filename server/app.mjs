@@ -186,7 +186,7 @@ function isMember(member) {
   return member.status === 'creator' || member.status === 'administrator' || member.status === 'member' || (member.status === 'restricted' && member.is_member === true);
 }
 
-function toFilm(row) {
+function toFilm(row, posterUrl = null) {
   const numericMessageId = Number(row.message_id);
   return {
     id: row.id,
@@ -197,7 +197,7 @@ function toFilm(row) {
     genre: row.genre || 'Не указан',
     duration: 'Не указана',
     description: row.description || '',
-    poster: row.poster || '/favicon.svg',
+    poster: posterUrl || row.poster || '/favicon.svg',
     kind: row.kind === 'Сериал' ? 'Сериал' : 'Фильм',
     source: 'telegram',
     videoAvailable: Boolean(row.video_file_id),
@@ -238,6 +238,10 @@ function parseChannelFilm(message, updateId) {
       : `Публикация №${message.message_id}`;
   }
   if (!title) return null;
+  const photoSizes = Array.isArray(message.photo) ? [...message.photo].reverse() : [];
+  const posterFileId = typeof message.video?.thumbnail?.file_id === 'string'
+    ? message.video.thumbnail.file_id
+    : photoSizes.find((photo) => typeof photo?.file_id === 'string')?.file_id || null;
   return {
     id: crypto.randomUUID(),
     title: title.slice(0, 500),
@@ -251,6 +255,8 @@ function parseChannelFilm(message, updateId) {
     videoFileSize: Number.isSafeInteger(message.video?.file_size) ? message.video.file_size : null,
     videoMimeType: typeof message.video?.mime_type === 'string' ? message.video.mime_type.slice(0, 120) : null,
     videoDuration: Number.isSafeInteger(message.video?.duration) ? message.video.duration : null,
+    posterFileId,
+    mediaGroupId: typeof message.media_group_id === 'string' && message.media_group_id.length <= 128 ? message.media_group_id : null,
   };
 }
 
@@ -426,12 +432,21 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function getFilmOr404(id, executor = pool) {
     if (!UUID_RE.test(id)) throw new RequestError(404, 'film_not_found', 'Фильм не найден.');
     const result = await executor.query(`
-      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, video_file_id, video_file_size, video_mime_type, video_duration
+      SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
       FROM films
       WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0 AND message_id <= 9007199254740991
     `, [id, config.telegramChannelId]);
     if (!result.rows[0]) throw new RequestError(404, 'film_not_found', 'Фильм не найден.');
     return result.rows[0];
+  }
+
+  function posterProxyUrl(film) {
+    if (!film.poster_file_id || !config.telegramBotToken) return null;
+    const base = (config.publicBaseUrl || config.appOrigins[0] || '').replace(/\/+$/, '');
+    if (!base) return null;
+    const expiresAt = Math.floor(Date.now() / 1000) + 300;
+    const token = signVideoToken(film.id, expiresAt, config.telegramBotToken);
+    return `${base}/api/films/${film.id}/poster?token=${encodeURIComponent(token)}`;
   }
 
   async function withTransaction(operation) {
@@ -450,9 +465,30 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   }
 
   async function upsertChannelFilm(client, film) {
+    if (film.mediaGroupId) {
+      await client.query(`
+        INSERT INTO films (id, title, description, channel_id, message_id, channel_username, source_date, last_update_id, video_file_id, video_file_size, video_mime_type, video_duration, poster_file_id, media_group_id)
+        VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7::timestamptz, $8::bigint, $9, $10::bigint, $11, $12, $13, $14)
+        ON CONFLICT (channel_id, media_group_id) WHERE media_group_id IS NOT NULL DO UPDATE SET
+          title = CASE WHEN EXCLUDED.title LIKE 'Публикация №%' AND films.title NOT LIKE 'Публикация №%' THEN films.title ELSE EXCLUDED.title END,
+          description = CASE WHEN EXCLUDED.title LIKE 'Публикация №%' AND films.title NOT LIKE 'Публикация №%' THEN films.description ELSE EXCLUDED.description END,
+          channel_username = COALESCE(EXCLUDED.channel_username, films.channel_username),
+          source_date = COALESCE(EXCLUDED.source_date, films.source_date),
+          message_id = CASE WHEN EXCLUDED.video_file_id IS NOT NULL OR films.video_file_id IS NULL THEN EXCLUDED.message_id ELSE films.message_id END,
+          video_file_id = COALESCE(EXCLUDED.video_file_id, films.video_file_id),
+          video_file_size = COALESCE(EXCLUDED.video_file_size, films.video_file_size),
+          video_mime_type = COALESCE(EXCLUDED.video_mime_type, films.video_mime_type),
+          video_duration = COALESCE(EXCLUDED.video_duration, films.video_duration),
+          poster_file_id = COALESCE(EXCLUDED.poster_file_id, films.poster_file_id),
+          last_update_id = EXCLUDED.last_update_id,
+          updated_at = now()
+        WHERE films.last_update_id <= EXCLUDED.last_update_id
+      `, [film.id, film.title, film.description, film.channelId, film.messageId, film.channelUsername, film.sourceDate, film.updateId, film.videoFileId, film.videoFileSize, film.videoMimeType, film.videoDuration, film.posterFileId, film.mediaGroupId]);
+      return;
+    }
     await client.query(`
-      INSERT INTO films (id, title, description, channel_id, message_id, channel_username, source_date, last_update_id, video_file_id, video_file_size, video_mime_type, video_duration)
-      VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7::timestamptz, $8::bigint, $9, $10::bigint, $11, $12)
+      INSERT INTO films (id, title, description, channel_id, message_id, channel_username, source_date, last_update_id, video_file_id, video_file_size, video_mime_type, video_duration, poster_file_id, media_group_id)
+      VALUES ($1, $2, $3, $4::bigint, $5::bigint, $6, $7::timestamptz, $8::bigint, $9, $10::bigint, $11, $12, $13, $14)
       ON CONFLICT (channel_id, message_id) DO UPDATE SET
         title = EXCLUDED.title,
         description = EXCLUDED.description,
@@ -462,10 +498,11 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
         video_file_size = COALESCE(EXCLUDED.video_file_size, films.video_file_size),
         video_mime_type = COALESCE(EXCLUDED.video_mime_type, films.video_mime_type),
         video_duration = COALESCE(EXCLUDED.video_duration, films.video_duration),
+        poster_file_id = COALESCE(EXCLUDED.poster_file_id, films.poster_file_id),
         last_update_id = EXCLUDED.last_update_id,
         updated_at = now()
       WHERE films.last_update_id <= EXCLUDED.last_update_id
-    `, [film.id, film.title, film.description, film.channelId, film.messageId, film.channelUsername, film.sourceDate, film.updateId, film.videoFileId, film.videoFileSize, film.videoMimeType, film.videoDuration]);
+    `, [film.id, film.title, film.description, film.channelId, film.messageId, film.channelUsername, film.sourceDate, film.updateId, film.videoFileId, film.videoFileSize, film.videoMimeType, film.videoDuration, film.posterFileId, null]);
   }
 
   async function sendSubscriptionInstructions(message) {
@@ -824,7 +861,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     const parameters = [config.telegramChannelId, q, limit, offset];
     const [films, count] = await Promise.all([
       pool.query(`
-        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, video_file_id, video_file_size, video_mime_type, video_duration
+        SELECT id, title, description, channel_id, message_id, channel_username, source_date, year, genre, kind, poster, poster_file_id, video_file_id, video_file_size, video_mime_type, video_duration
         FROM films
         WHERE channel_id = $1::bigint AND message_id > 0 AND message_id <= 9007199254740991
           AND ($2 = '' OR title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')
@@ -838,7 +875,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       `, [config.telegramChannelId, q]),
     ]);
     response.json({
-      items: films.rows.map(toFilm),
+      items: films.rows.map((film) => toFilm(film, posterProxyUrl(film))),
       pagination: { total: Number(count.rows[0].total), limit, offset },
     });
   }));
@@ -866,7 +903,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
     const expiresAt = Math.floor(Date.now() / 1000) + 300;
     const token = signVideoToken(film.id, expiresAt, config.telegramBotToken);
-    const base = config.publicBaseUrl || config.appOrigins[0];
+    const base = (config.publicBaseUrl || config.appOrigins[0] || '').replace(/\/+$/, '');
     if (!base) return sendError(response, 503, 'video_source_not_configured', 'Публичный HTTPS-адрес сервера не настроен.');
     response.json({ url: `${base}/api/films/${film.id}/stream?token=${encodeURIComponent(token)}`, expiresAt, mimeType: film.video_mime_type || 'video/mp4' });
   }));
@@ -905,11 +942,41 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     response.end();
   }));
 
+  app.get('/api/films/:id/poster', asyncRoute(async (request, response) => {
+    if (!config.telegramBotToken) return sendError(response, 503, 'poster_source_not_configured', 'Telegram poster source is not configured.');
+    const verified = verifyVideoToken(request.query.token, config.telegramBotToken);
+    if (!verified || verified.filmId !== request.params.id) return sendError(response, 401, 'invalid_poster_token', 'Ссылка на афишу истекла. Откройте фильм заново.');
+    const film = await getFilmOr404(request.params.id);
+    if (!film.poster_file_id) return sendError(response, 404, 'poster_not_found', 'Афиша для этого фильма не найдена.');
+    let file;
+    try {
+      file = await telegramClient.getFile(film.poster_file_id);
+    } catch {
+      return sendError(response, 502, 'telegram_poster_unavailable', 'Не удалось получить афишу из Telegram.');
+    }
+    if (!file?.file_path) return sendError(response, 502, 'telegram_poster_unavailable', 'Путь к афише недоступен.');
+    let upstream;
+    try {
+      upstream = await fetch(`https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`, { signal: AbortSignal.timeout(20_000) });
+    } catch {
+      return sendError(response, 502, 'telegram_poster_unavailable', 'Не удалось загрузить афишу из Telegram.');
+    }
+    if (!upstream.ok || !upstream.body) return sendError(response, 502, 'telegram_poster_unavailable', 'Telegram не вернул изображение афиши.');
+    const upstreamType = upstream.headers.get('content-type') || '';
+    response.status(200);
+    response.set('Content-Type', /^image\/(jpeg|png|webp|gif)$/i.test(upstreamType) ? upstreamType : 'image/jpeg');
+    response.set('X-Content-Type-Options', 'nosniff');
+    const size = upstream.headers.get('content-length');
+    if (size && /^\d+$/.test(size)) response.set('Content-Length', size);
+    for await (const chunk of upstream.body) response.write(chunk);
+    response.end();
+  }));
+
   app.get('/api/films/:id', asyncRoute(async (request, response) => {
     await authenticateMember(request, response);
     if (response.headersSent) return;
     const film = await getFilmOr404(request.params.id);
-    response.json(toFilm(film));
+    response.json(toFilm(film, posterProxyUrl(film)));
   }));
 
   app.post('/api/admin/films/import', asyncRoute(async (request, response) => {

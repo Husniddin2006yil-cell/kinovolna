@@ -34,6 +34,9 @@ export async function migrate(pool) {
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_file_size bigint');
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_mime_type text');
     await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS video_duration integer');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS poster_file_id text');
+    await client.query('ALTER TABLE films ADD COLUMN IF NOT EXISTS media_group_id text');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS films_channel_media_group_unique ON films (channel_id, media_group_id) WHERE media_group_id IS NOT NULL');
     await client.query(`
       CREATE TABLE IF NOT EXISTS tmdb_catalog (
         tmdb_id integer NOT NULL,

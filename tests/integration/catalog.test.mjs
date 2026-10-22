@@ -165,6 +165,28 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     assert.equal((await api('/api/admin/films/import', { ...options, body: JSON.stringify(bad) })).status, 400);
   });
 
+  await t.test('poster and video messages from one Telegram media group become one film row', async () => {
+    const date = Math.floor(Date.now() / 1000);
+    const mediaGroupId = `media-${randomUUID()}`;
+    const photo = {
+      update_id: 13,
+      channel_post: { message_id: 56, date, chat: { id: Number(testChannel), type: 'channel' }, media_group_id: mediaGroupId, caption: 'Album film\nAlbum description', photo: [{ file_id: 'photo-small' }, { file_id: 'photo-large' }] },
+    };
+    const video = {
+      update_id: 14,
+      channel_post: { message_id: 57, date, chat: { id: Number(testChannel), type: 'channel' }, media_group_id: mediaGroupId, video: { file_id: 'album-video-file', thumbnail: { file_id: 'album-video-thumbnail' }, file_size: 2048 } },
+    };
+    assert.equal((await post(photo)).status, 200);
+    assert.equal((await post(video)).status, 200);
+    const rows = await pool.query('SELECT id, title, description, message_id, media_group_id, poster_file_id, video_file_id FROM films WHERE media_group_id = $1', [mediaGroupId]);
+    assert.equal(rows.rows.length, 1);
+    assert.equal(rows.rows[0].title, 'Album film');
+    assert.equal(rows.rows[0].description, 'Album description');
+    assert.equal(String(rows.rows[0].message_id), '57');
+    assert.equal(rows.rows[0].poster_file_id, 'album-video-thumbnail');
+    assert.equal(rows.rows[0].video_file_id, 'album-video-file');
+  });
+
   await t.test('database failures return errors, not fabricated catalog responses', async () => {
     const invalidPool = { query: async () => { throw new Error('Explicit test-only database outage'); } };
     const broken = createApp({ config, pool: invalidPool, telegram }).listen(0, '127.0.0.1');

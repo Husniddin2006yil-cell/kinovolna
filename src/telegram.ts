@@ -112,6 +112,21 @@ export async function loadTelegramCatalog() {
       if (!page.items.length && offset < total) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог.');
       if (offset > 10000) throw new CatalogApiError(413, 'catalog_too_large', 'Каталог слишком большой для одной загрузки. Нужна серверная постраничная навигация.');
     } while (offset < total);
+    if (films.length) return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
+    if (config.tmdbConfigured) {
+      const tmdbFilms: Film[] = [];
+      let tmdbOffset = 0;
+      let tmdbTotal = 0;
+      do {
+        const page = await apiRequest<{ items: Film[]; pagination: { total: number; limit: number; offset: number } }>(`/api/catalog?limit=100&offset=${tmdbOffset}&category=popular`);
+        if (!Array.isArray(page.items) || !page.pagination || !Number.isSafeInteger(page.pagination.total)) throw new CatalogApiError(502, 'invalid_catalog', 'Backend вернул некорректный каталог TMDB.');
+        tmdbFilms.push(...page.items);
+        tmdbTotal = page.pagination.total;
+        tmdbOffset += page.items.length;
+        if (!page.items.length && tmdbOffset < tmdbTotal) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог TMDB.');
+      } while (tmdbOffset < tmdbTotal);
+      return { films: tmdbFilms, user: auth.user, startParam: auth.startParam, mode: 'tmdb' as const };
+    }
     return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
   }
   if (config.databaseConfigured && config.tmdbConfigured) {

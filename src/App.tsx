@@ -815,7 +815,6 @@ function App() {
           <p>{film.description}</p>
           <div className="detail-actions">
             <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Ищем в Telegram…' : 'Отправить в бот'}</button>
-            <button className="button button-glass" onClick={() => void handleWatchAction(film)}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
           <div className="rights-note"><Info size={14} /> Используются только источники, которые разрешено распространять.</div>

@@ -101,15 +101,14 @@ function mergeTelegramAndTmdbFilms(tmdbFilms: Film[], telegramFilms: Film[]): Fi
   for (const telegramFilm of telegramFilms) {
     const key = normalizeCatalogTitle(telegramFilm.title) || telegramFilm.id;
     const tmdbFilm = merged.get(key);
-    if (!tmdbFilm) { merged.set(key, telegramFilm); continue; }
+    // Channel-only films stay hidden from Mini App. They remain indexed on the
+    // server so a matching TMDB card can still send the real post to the bot.
+    if (!tmdbFilm) continue;
     merged.set(key, {
       ...tmdbFilm,
-      ...telegramFilm,
-      poster: telegramFilm.poster && !telegramFilm.poster.endsWith('/favicon.svg') ? telegramFilm.poster : tmdbFilm.poster,
-      rating: tmdbFilm.rating,
-      genre: tmdbFilm.genre,
-      description: tmdbFilm.description || telegramFilm.description,
-      source: 'telegram',
+      // Keep TMDB title/poster/rating visible; the channel row is resolved
+      // later only when the user presses “Отправить в бот”.
+      source: 'tmdb',
     });
   }
   return [...merged.values()];

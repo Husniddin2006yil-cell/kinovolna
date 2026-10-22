@@ -92,36 +92,33 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
 
 export async function loadTelegramCatalog() {
   const config = await apiRequest<{ telegramConfigured: boolean; databaseConfigured: boolean; channelConfigured: boolean; tmdbConfigured: boolean }>('/api/config');
+  const initData = getTelegramWebApp()?.initData;
+  if (initData && config.telegramConfigured && config.databaseConfigured && config.channelConfigured) {
+    const auth = await apiRequest<{ user: TelegramUser; startParam?: string }>('/api/telegram/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData }),
+    });
+    const films: Film[] = [];
+    let offset = 0;
+    let total = 0;
+    do {
+      const page = await apiRequest<{ items: Film[]; pagination: { total: number; limit: number; offset: number } }>(`/api/films?limit=100&offset=${offset}`);
+      if (!Array.isArray(page.items) || !page.pagination || !Number.isSafeInteger(page.pagination.total)) throw new CatalogApiError(502, 'invalid_catalog', 'Backend вернул некорректный каталог.');
+      films.push(...page.items);
+      total = page.pagination.total;
+      offset += page.items.length;
+      if (!page.items.length && offset < total) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог.');
+      if (offset > 10000) throw new CatalogApiError(413, 'catalog_too_large', 'Каталог слишком большой для одной загрузки. Нужна серверная постраничная навигация.');
+    } while (offset < total);
+    return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
+  }
   if (config.databaseConfigured && config.tmdbConfigured) {
     const page = await apiRequest<{ items: Film[]; pagination: { total: number; limit: number; offset: number } }>('/api/catalog?limit=100&category=popular');
     if (!Array.isArray(page.items) || !page.pagination) throw new CatalogApiError(502, 'invalid_catalog', 'Backend вернул некорректный каталог TMDB.');
     return { films: page.items, user: null, startParam: undefined, mode: 'tmdb' as const };
   }
-  if (!config.telegramConfigured || !config.databaseConfigured || !config.channelConfigured) {
-    throw new CatalogApiError(503, 'configuration_required', 'Нужны серверный токен бота, ID канала и PostgreSQL. Демо-каталог доступен отдельно.');
-  }
-  const initData = getTelegramWebApp()?.initData;
-  if (!initData) throw new CatalogApiError(401, 'init_data_required', 'Откройте Mini App из вашего Telegram-бота для доступа к закрытому каталогу.');
-  const auth = await apiRequest<{ user: TelegramUser; startParam?: string }>('/api/telegram/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData }),
-  });
-  const films: Film[] = [];
-  let offset = 0;
-  let total = 0;
-  do {
-    const page = await apiRequest<{ items: Film[]; pagination: { total: number; limit: number; offset: number } }>(`/api/films?limit=100&offset=${offset}`);
-    if (!Array.isArray(page.items) || !page.pagination || !Number.isSafeInteger(page.pagination.total)) {
-      throw new CatalogApiError(502, 'invalid_catalog', 'Backend вернул некорректный каталог.');
-    }
-    films.push(...page.items);
-    total = page.pagination.total;
-    offset += page.items.length;
-    if (!page.items.length && offset < total) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог.');
-    if (offset > 10000) throw new CatalogApiError(413, 'catalog_too_large', 'Каталог слишком большой для одной загрузки. Нужна серверная постраничная навигация.');
-  } while (offset < total);
-  return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
+  throw new CatalogApiError(503, 'configuration_required', 'Нужны серверный токен бота, ID канала и PostgreSQL. Демо-каталог доступен отдельно.');
 }
 
 // The server alone resolves actual indexed posts. Never build links for demo IDs.

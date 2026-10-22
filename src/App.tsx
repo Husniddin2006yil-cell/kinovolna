@@ -162,16 +162,17 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
   );
 }
 
-function TrackRow({ track, index, isFavorite, onFavorite, onSelect, onArtist }: {
+function TrackRow({ track, index, isFavorite, isActive, onFavorite, onSelect, onArtist }: {
   track: Track;
   index: number;
   isFavorite: boolean;
+  isActive: boolean;
   onFavorite: () => void;
   onSelect: () => void;
   onArtist: () => void;
 }) {
   return (
-    <div className="track-row">
+    <div className={`track-row ${isActive ? 'track-row-active' : ''}`}>
       <span className="track-rank">{String(index + 1).padStart(2, '0')}</span>
       <div className={`track-cover ${track.coverStyle}`}>{track.thumbnailUrl ? <img className="track-cover-image" src={track.thumbnailUrl} alt="" loading="lazy" /> : <AudioLines size={18} />}</div>
       <div className="track-info">
@@ -183,7 +184,7 @@ function TrackRow({ track, index, isFavorite, onFavorite, onSelect, onArtist }: 
       <button className={`icon-button track-heart ${isFavorite ? 'is-favorite' : ''}`} onClick={onFavorite} aria-label={isFavorite ? 'Убрать трек из избранного' : 'Добавить трек в избранное'}>
         <Heart size={15} fill={isFavorite ? 'currentColor' : 'none'} />
       </button>
-      <button className="icon-button track-play" onClick={onSelect} aria-label={`Статус аудиоисточника: ${track.title}`}><Play size={15} fill="currentColor" /></button>
+      <button className="icon-button track-play" onClick={onSelect} aria-label={track.source === 'youtube' ? `Открыть YouTube: ${track.title}` : `${isActive ? 'Пауза' : 'Воспроизвести'}: ${track.title}`}><Play size={15} fill="currentColor" /></button>
     </div>
   );
 }
@@ -350,8 +351,12 @@ function App() {
     try {
       const saved = window.localStorage.getItem('kinovolna:favorites');
       const savedHistory = window.localStorage.getItem('kinovolna:history');
+      const savedMusicFavorites = window.localStorage.getItem('kinovolna:music-favorites');
+      const savedRecentTracks = window.localStorage.getItem('kinovolna:music-history');
       if (saved) setFavorites(JSON.parse(saved) as string[]);
       if (savedHistory) setHistory(JSON.parse(savedHistory) as string[]);
+      if (savedMusicFavorites) setMusicFavorites(JSON.parse(savedMusicFavorites) as string[]);
+      if (savedRecentTracks) setRecentTrackIds(JSON.parse(savedRecentTracks) as string[]);
     } catch {
       // Local storage is optional in Telegram's embedded browser.
     }
@@ -364,6 +369,14 @@ function App() {
   useEffect(() => {
     try { window.localStorage.setItem('kinovolna:history', JSON.stringify(history)); } catch { /* optional */ }
   }, [history]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('kinovolna:music-favorites', JSON.stringify(musicFavorites)); } catch { /* optional */ }
+  }, [musicFavorites]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('kinovolna:music-history', JSON.stringify(recentTrackIds)); } catch { /* optional */ }
+  }, [recentTrackIds]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -405,6 +418,8 @@ function App() {
       return matchesQuery && matchesMode && matchesMood;
     });
   }, [musicTracks, musicFavorites, musicMode, musicQuery, selectedMusicMood]);
+
+  const musicQueue = useMemo(() => [...musicTracks, ...openAudioTracks].filter((track, index, list) => list.findIndex((item) => item.id === track.id) === index), [musicTracks]);
 
   const goTo = (next: Section) => {
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
@@ -497,8 +512,18 @@ function App() {
 
   const chooseTrack = (track: Track) => {
     setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
+    if (track.source === 'youtube') {
+      const url = track.sourceUrl;
+      if (url) {
+        const webApp = getTelegramWebApp();
+        if (webApp?.openLink) webApp.openLink(url);
+        else window.open(url, '_blank', 'noopener,noreferrer');
+      }
+      openUnavailable('YouTube audio-only emas', 'YouTube qidiruvi faqat metadata va rasmiy tashqi ko‘rish havolasini beradi. YouTube videosi ilova ichida yashirilmaydi va undan audio ajratib olinmaydi. Audio uchun Deezer preview yoki Open archive treklaridan foydalaning.', 'YouTube · cheklov');
+      return;
+    }
     setActiveTrack(track);
-    if (track.audioUrl || track.youtubeVideoId) { setPlayerOpen(false); setPlayRequest((current) => current + 1); }
+    if (track.audioUrl) { setPlayerOpen(false); setPlayRequest((current) => current + 1); }
     else openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist}. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток.`, 'Музыка · источник недоступен');
   };
 
@@ -581,6 +606,7 @@ function App() {
           track={track}
           index={index}
           isFavorite={musicFavorites.includes(track.id)}
+          isActive={activeTrack?.id === track.id}
           onFavorite={() => toggleMusicFavorite(track.id)}
           onSelect={() => chooseTrack(track)}
           onArtist={() => { if (track.source === 'youtube') { setMusicQuery(track.artist); setYoutubeSearchResults(null); } else setSelectedArtist(track.artist); }}
@@ -779,7 +805,7 @@ function App() {
         {content}
         <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : catalogMode === 'tmdb' ? 'Метаданные TMDB · легальный видеопровайдер не подключён' : 'Для реального каталога нужна настройка источника'}</span></footer>
       </main>
-      <MusicPlayer track={activeTrack} playRequest={playRequest} open={playerOpen} onOpen={setPlayerOpen} viewportHeight={viewportHeight} covered={Boolean(videoUrl || notice)} />
+      <MusicPlayer track={activeTrack} queue={musicQueue} playRequest={playRequest} open={playerOpen} onOpen={setPlayerOpen} onTrackChange={chooseTrack} />
       <nav className="mobile-nav" aria-label="Мобильная навигация">
         {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`mobile-nav-item ${section === id && !selectedFilm ? 'mobile-nav-active' : ''}`} onClick={() => goTo(id)}><span className="mobile-icon-wrap"><Icon size={19} strokeWidth={section === id ? 2.3 : 1.8} /></span><span>{label}</span></button>)}
       </nav>

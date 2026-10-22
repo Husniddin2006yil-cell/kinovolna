@@ -279,6 +279,14 @@ test('/start film copies the protected video with a plain caption and no source 
   assert.equal(calls.some((call) => call.method === 'forwardMessage'), false);
 });
 
+test('historical imported rows without file_id still copy the original channel message', async (t) => {
+  const film = { ...botFilm('11111111-1111-4111-8111-111111111111', 'Old Film', 48), video_file_id: null };
+  const { base, sent, calls } = await serve(t, { pool: createPool('1', [film]) });
+  assert.equal((await deliver(base, messageUpdate(28, testUser, 'old film'))).status, 200);
+  assert.equal(sent.length, 0);
+  assert.equal(calls.find((call) => call.method === 'copyMessage')?.parameters.messageId, film.message_id);
+});
+
 test('bot title search reports no match and does not reveal results to an unsubscribed user', async (t) => {
   const film = botFilm('11111111-1111-4111-8111-111111111111', 'Interstellar', 44);
   const noMatch = await serve(t, { pool: createPool('1', [film]) });

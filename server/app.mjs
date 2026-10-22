@@ -519,7 +519,10 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   }
 
   async function sendFilmToPrivateChat(chatId, film) {
-    if (film.video_file_id) {
+    // Imported historical rows may not have a file_id, but copyMessage can still
+    // copy the original channel message by chat_id + message_id. Playback remains
+    // disabled until a real video_file_id is indexed.
+    if (film.message_id && film.channel_id) {
       try {
         await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, movieCopyOptions(film.title));
         return;
@@ -697,18 +700,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
       await telegramClient.sendMessage(message.chat.id, 'Фильм не найден или больше недоступен.');
       return;
     }
-    if (row.video_file_id) {
-      try {
-        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, movieCopyOptions(row.title));
-        return;
-      } catch {
-        await telegramClient.sendMessage(message.chat.id, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
-        return;
-      }
-    }
-    const url = publicChannelUrl(row);
-    if (!url) throw new RequestError(500, 'link_unavailable', 'Ссылка на фильм недоступна.');
-    await telegramClient.sendMessage(message.chat.id, `Откройте публикацию: ${url}`);
+    await sendFilmToPrivateChat(message.chat.id, row);
   }
 
   async function processAdminCallback(client, callback) {

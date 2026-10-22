@@ -18,6 +18,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "tmdb:sync": "node scripts/tmdb-sync.mjs",
     "telegram:check": "node scripts/telegram-setup.mjs check",
+    "telegram:import-export": "node scripts/import-channel-export.mjs",
     "telegram:webhook": "node scripts/telegram-setup.mjs webhook",
     "telegram:menu": "node scripts/telegram-setup.mjs menu",
     "test": "node --test tests/*.test.mjs",

@@ -6,26 +6,22 @@
 .player-expanded .player-detail, .player-detail.detail-visible { display: block; }
 .player-detail-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
 .player-detail-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.persistent-youtube { width: min(400px, 100%); min-width: 200px; margin: 0 auto; }
-.persistent-player .youtube-player-frame { width: 100%; height: 200px; min-height: 200px; margin: 0; aspect-ratio: auto; border-radius: 0; }
-.persistent-player .youtube-player-host, .persistent-player .youtube-player-host iframe { width: 100%; height: 200px; min-height: 200px; border: 0; display: block; }
-.youtube-no-room { display: none; }
-.persistent-player.has-youtube .real-audio-preview { display: none; }
 .persistent-player .real-audio-preview { margin: 8px 0; width: 100%; }
+.audio-only-controls { display: flex; justify-content: center; align-items: center; gap: 14px; padding: 6px 0; }
+.audio-only-controls button:disabled { opacity: .35; cursor: not-allowed; }
+.player-main-control { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 50%; background: var(--mint); color: #071116; cursor: pointer; }
 .player-source-note, .playback-message { margin: 5px 12px; font-size: 11px; line-height: 1.45; color: #a9bbca; }
 .playback-message { color: #ffd4dc; }
 .player-source-note a, .playback-message a { color: var(--mint); }
 .persistent-timeline { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 8px 0; }
 .persistent-timeline input { flex: 1; min-width: 0; accent-color: var(--mint); }
-.app-shell:has(.persistent-player.has-youtube) { padding-bottom: 340px; }
-.app-shell:has(.persistent-player.player-expanded:not(.has-youtube)) { padding-bottom: 220px; }
+.app-shell:has(.persistent-player.player-expanded) { padding-bottom: 220px; }
 @media (max-width: 760px) {
   .persistent-player { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); width: calc(100% - 16px); }
   .persistent-player .mini-info { flex: 1; }
   .persistent-player .mini-info strong { font-size: 11px; }
   .persistent-player .mini-info span { font-size: 9px; }
   .persistent-player .mini-progress { max-width: 40px; }
-  .app-shell:has(.persistent-player.has-youtube) { padding-bottom: 390px; }
   .mobile-nav { height: calc(64px + env(safe-area-inset-bottom, 0px)); }
   /* iOS zooms focused text inputs below 16px. Keep accessibility zoom enabled. */
   .top-search input, .large-search input { font-size: 16px; }
@@ -46,6 +42,3 @@ html.telegram-viewport, .telegram-viewport body, .telegram-viewport #root { heig
 .telegram-viewport .player-modal, .telegram-viewport .notice-modal { max-height: calc(var(--app-viewport-height) - 24px); overflow-y: auto; }
 
 @media (max-width: 760px) { .top-search { display: none; } }
-@media (max-height: 600px) {
-  .has-youtube .player-detail-heading, .has-youtube .persistent-timeline, .has-youtube .player-source-note { display: none; }
-}

@@ -17,6 +17,11 @@ type TelegramWebApp = {
   openLink?: (url: string) => void;
   ready?: () => void;
   initData?: string;
+  viewportHeight?: number;
+  viewportStableHeight?: number;
+  isActive?: boolean;
+  onEvent?: (event: string, callback: () => void) => void;
+  offEvent?: (event: string, callback: () => void) => void;
 };
 
 declare global {

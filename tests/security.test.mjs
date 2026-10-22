@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { readConfig } from '../server/config.mjs';
 import { createApp, verifyTelegramInitData } from '../server/app.mjs';
 import { createTelegramClient, TelegramApiError } from '../server/telegram.mjs';
+import { movieCopyOptions } from '../server/movie-caption.mjs';
 import { signInitData, testBotToken, testUser, testEnvironment } from './helpers.mjs';
 
 const now = 1800000000;
@@ -82,6 +83,15 @@ test('unconfigured API is honest, protected, JSON-only and does not expose secre
   assert.match(unknown.headers.get('content-type'), /application\/json/);
 });
 
+test('HTTP responses explicitly allow an origin-only cross-origin referrer', async (t) => {
+  const server = createApp({ config: readConfig({}), pool: null, telegram: null }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/health`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+});
+
 test('music recognition preserves the real audio container and maps AudD errors safely', async (t) => {
   const server = createApp({ config: readConfig({ AUDIO_RECOGNITION_API_KEY: 'server-only-test-token' }), pool: null, telegram: null }).listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -154,4 +164,33 @@ test('Telegram transport sanitizes fetch errors containing token URLs', async ()
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test('Telegram copyMessage sends clean movie options unchanged in the Bot API request', async () => {
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (input, init) => {
+    request = { url: String(input), method: init.method, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await createTelegramClient(testBotToken).copyMessage(424242, '-1001234567890', 55, movieCopyOptions('The Matrix — @kinovolna https://t.me/kinovolna/55'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(request.url.endsWith('/copyMessage'), true);
+  assert.deepEqual(request, {
+    url: request.url,
+    method: 'POST',
+    body: {
+      chat_id: 424242,
+      from_chat_id: '-1001234567890',
+      message_id: 55,
+      protect_content: true,
+      caption: 'The Matrix',
+      caption_entities: [],
+      reply_markup: { inline_keyboard: [] },
+    },
+  });
+  assert.equal('parse_mode' in request.body, false);
 });

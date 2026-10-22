@@ -68,3 +68,13 @@
 Yuqoridagi amalga oshirilgan kod lokal PostgreSQL va ataylab belgilangan Telegram test double bilan tekshirildi: `pnpm build`, `pnpm typecheck`, 14 unit/security test va 12 integratsion test muvaffaqiyatli. HTTP orqali production rejimida frontend, `/api/health`, `/api/ready`, maxfiy sozlanmagan API xatolari tekshirildi. Secret scan va `pnpm audit --prod` toza. Mavjud fayllar o‘chirilmagan.
 
 Haqiqiy Telegram tokeni, kanal/admin IDlari va hosting hali berilmagan; live Bot API/webhook, production PostgreSQL va Docker image build/deploy tekshirilmagan. Mini App va botning user-facing matnlari rus tilida; foydalanuvchiga izoh va sozlash qo‘llanmasi o‘zbekcha. Oldingi bo‘limlardagi ko‘p shartli kelajak punktlari ushbu bosqichda to‘liq bajarilgan deb belgilanmagan.
+
+## Xavfsiz davom ettirish — 2026-10-22
+
+Ushbu vazifa uchun foydalanuvchi testlar o‘tgach mavjud `main` repozitoriyga push va mavjud Render servisiga deploy qilishga ruxsat berdi; oldingi vazifalarning nashr cheklovlari tarixiy yozuvdir.
+
+- [ ] Qidiruv sahifasi Telegram Mini App ichida ochilsin; dastlabki layout balandligi saqlansin, expand/avtofokus bo‘lmasin, iOS input zoom va klaviatura layout o‘zgarishlari hisobga olinsin.
+- [ ] YouTube qo‘shiq qidiruvi va tanlangan natija rasmiy, ko‘rinadigan IFrame Player orqali ishlasin; API kaliti faqat serverda qolsin, xatolar xavfsiz ko‘rsatilsin. Bepul va qonuniy audio muqobili tekshirilsin.
+- [ ] Audio va ruxsat etilgan ko‘rinadigan YouTube pleyeri kino, serial, qidiruv va profil sahifalari o‘zgarganda qayta yaratilmasin. Pastki mini-player nom, haqiqiy Play/Pause, pleyerga qaytish va real pozitsiyani ko‘rsatsin. Manba/Telegram cheklovlari ochiq aytilsin.
+- [ ] Bot kino yuborganda copyMessage ishlatilsin; caption faqat kino nomi bo‘lsin, manba kanali/URL/forwarded yozuvi bo‘lmasin. Himoyalangan kontent cheklovlari chetlab o‘tilmasin.
+- [ ] Regression, TypeScript, build va ajratilgan test bazasi tekshiruvlari o‘tsin; production katalog/baza o‘zgartirilmasin. Testlar o‘tgach aynan mavjud GitHub/Render’ga chiqarilib, fayllar, natijalar va qolgan cheklovlar hisobot qilinsin.

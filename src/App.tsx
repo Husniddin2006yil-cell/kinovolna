@@ -34,7 +34,9 @@ import {
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
 import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, type TelegramUser } from './telegram';
-import { YouTubePlayer } from './components/YouTubePlayer';
+import { MusicPlayer } from './components/MusicPlayer';
+import { useAppViewport } from './useAppViewport';
+import { openAudioTracks } from './open-audio';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -254,6 +256,8 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 function App() {
   const [section, setSection] = useState<Section>('home');
   const [query, setQuery] = useState('');
+  const viewportHeight = useAppViewport();
+  const [playRequest, setPlayRequest] = useState(0);
   const [musicQuery, setMusicQuery] = useState('');
   const [films, setFilms] = useState<FilmItem[]>([]);
   const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'tmdb' | 'demo' | 'blocked'>('loading');
@@ -367,7 +371,7 @@ function App() {
         event.preventDefault();
         setSelectedFilm(null);
         setSection('search');
-        window.setTimeout(() => document.querySelector<HTMLInputElement>('.main-search-input')?.focus(), 0);
+        // Keyboard shortcut opens the in-app page without triggering WebView focus/zoom.
       }
       if (event.key === 'Escape') {
         setNotice(null);
@@ -403,6 +407,7 @@ function App() {
   }, [musicTracks, musicFavorites, musicMode, musicQuery, selectedMusicMood]);
 
   const goTo = (next: Section) => {
+    if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
     setSection(next);
     setSelectedFilm(null);
     setSelectedArtist(null);
@@ -493,7 +498,7 @@ function App() {
   const chooseTrack = (track: Track) => {
     setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
     setActiveTrack(track);
-    if (track.audioUrl || track.youtubeVideoId) setPlayerOpen(true);
+    if (track.audioUrl || track.youtubeVideoId) { setPlayerOpen(false); setPlayRequest((current) => current + 1); }
     else openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist}. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток.`, 'Музыка · источник недоступен');
   };
 
@@ -693,9 +698,13 @@ function App() {
         <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Deezer previews</Tag></div>
         <div className="artist-grid">{[...new Set(musicTracks.map((track) => track.artist))].map((artist, index) => <button key={artist} className="artist-card" onClick={() => setSelectedArtist(artist)}><span className={`artist-avatar artist-avatar-${index + 1}`}><AudioLines size={20} /></span><strong>{artist}</strong><span>Deezer</span></button>)}</div>
 
+        <div className="music-toolbar"><div><div className="eyebrow">Wikimedia Commons · Public Domain</div><h2>Свободный аудиоархив</h2></div><Tag>Полные записи</Tag></div>
+        <p className="youtube-search-note">Две исторические записи, отмеченные источником как общественное достояние. Это не каталог современных хитов. Аудио продолжает играть при переходе между разделами; сведения о записи доступны по ссылке «Источник» в плеере.</p>
+        {renderTrackList(openAudioTracks)}
+
         <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Песня или исполнитель</div><h2>Поиск на YouTube</h2></div><Tag>Официальный YouTube-плеер</Tag></div>
         <form className="large-search music-search" onSubmit={(event) => void submitYoutubeSearch(event)}><Search size={18} /><input value={musicQuery} onChange={(event) => { setMusicQuery(event.target.value); setYoutubeSearchResults(null); setYoutubeSearchError(null); }} placeholder="Название песни или исполнитель..." aria-label="Поиск песни или исполнителя на YouTube" /><button type="submit" className="youtube-search-button" disabled={youtubeSearchBusy || !musicQuery.trim()}>{youtubeSearchBusy ? 'Ищем…' : 'Искать'}</button></form>
-        <p className="youtube-search-note">Показываются видео, которые YouTube отмечает как доступные для встраивания и просмотра в вашем регионе. Правообладатель может всё равно ограничить плеер.</p>
+        <p className="youtube-search-note">YouTube остаётся видимым при переходе между разделами: скрытое воспроизведение и извлечение аудио не поддерживаются. При сворачивании приложения или нехватке места из-за клавиатуры видео ставится на паузу. Правообладатель может ограничить отдельные ролики.</p>
         {youtubeSearchError && <div className="youtube-search-error" role="alert">{youtubeSearchError}</div>}
         <div className="music-list-toolbar"><div><span>{youtubeSearchResults ? 'Результаты YouTube' : 'Популярные треки Deezer'}</span></div><span>{youtubeSearchBusy ? 'Загрузка…' : (youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks)).length} треков</span></div>
         {renderTrackList(youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks))}
@@ -770,25 +779,11 @@ function App() {
         {content}
         <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : catalogMode === 'tmdb' ? 'Метаданные TMDB · легальный видеопровайдер не подключён' : 'Для реального каталога нужна настройка источника'}</span></footer>
       </main>
-      <div className="mini-player">
-        <button className={`mini-art ${activeTrack?.coverStyle ?? ''}`} onClick={() => setPlayerOpen(true)} aria-label="Открыть плеер"><AudioLines size={17} /></button>
-        <button className="mini-info" onClick={() => setPlayerOpen(true)}><strong>{activeTrack?.title ?? 'Выберите музыку'}</strong><span>{activeTrack ? `${activeTrack.artist} · ${activeTrack.youtubeVideoId ? 'YouTube' : activeTrack.audioUrl ? 'Deezer preview' : 'источник не подключён'}` : 'Выберите песню для прослушивания'}</span></button>
-        <div className="mini-progress"><span /></div>
-        <button className="mini-play" onClick={() => activeTrack?.audioUrl || activeTrack?.youtubeVideoId ? setPlayerOpen(true) : openUnavailable('Аудио пока не подключено', 'В этой версии нет аудиофайла или потока для воспроизведения. Плеер заработает после подключения разрешённого источника.', 'Нужен аудиоисточник')} aria-label="Открыть проигрыватель"><Play size={16} fill="currentColor" /></button>
-        <button className="mini-expand" onClick={() => setPlayerOpen(true)} aria-label="Открыть полноэкранный плеер"><Maximize2 size={15} /></button>
-      </div>
+      <MusicPlayer track={activeTrack} playRequest={playRequest} open={playerOpen} onOpen={setPlayerOpen} viewportHeight={viewportHeight} covered={Boolean(videoUrl || notice)} />
       <nav className="mobile-nav" aria-label="Мобильная навигация">
         {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`mobile-nav-item ${section === id && !selectedFilm ? 'mobile-nav-active' : ''}`} onClick={() => goTo(id)}><span className="mobile-icon-wrap"><Icon size={19} strokeWidth={section === id ? 2.3 : 1.8} /></span><span>{label}</span></button>)}
       </nav>
       {videoUrl && <div className="player-overlay" onClick={() => setVideoUrl(null)} role="presentation"><section className="player-modal video-modal" role="dialog" aria-modal="true" aria-label="Онлайн просмотр" onClick={(event) => event.stopPropagation()}><button className="player-close icon-button" onClick={() => setVideoUrl(null)} aria-label="Закрыть видео"><X size={19} /></button><Tag><Play size={13} fill="currentColor" /> КИНОВОЛНА · ОНЛАЙН</Tag><h2>{selectedFilm?.title ?? 'Видео'}</h2><video className="film-video" controls autoPlay playsInline src={videoUrl}>Ваш браузер не поддерживает видео.</video><p className="video-modal-note">Видеопоток отдается сервером через Telegram Bot API по временной защищённой ссылке.</p></section></div>}
-      {playerOpen && <div className="player-overlay" onClick={() => setPlayerOpen(false)} role="presentation"><section className="player-modal" role="dialog" aria-modal="true" aria-label="Полноэкранный плеер" onClick={(event) => event.stopPropagation()}>
-        <button className="player-close icon-button" onClick={() => setPlayerOpen(false)} aria-label="Закрыть плеер"><X size={19} /></button>
-        <div className={`player-cover ${activeTrack?.coverStyle ?? 'cover-moon'}`}><AudioLines size={45} /></div>
-        <Tag><Disc3 size={13} /> {activeTrack?.youtubeVideoId ? 'YOUTUBE · ОФИЦИАЛЬНЫЙ ПЛЕЕР' : activeTrack?.audioUrl ? 'DEEZER · PREVIEW' : 'ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН'}</Tag>
-        <h2>{activeTrack?.title ?? 'Выберите трек'}</h2>
-        <button className="player-artist" onClick={() => { if (activeTrack) { setPlayerOpen(false); setSelectedArtist(activeTrack.artist); setSection('music'); } }}>{activeTrack?.artist ?? 'КИНОВОЛНА'}</button>
-        {activeTrack?.youtubeVideoId ? <><YouTubePlayer videoId={activeTrack.youtubeVideoId} title={activeTrack.title} /><p className="video-modal-note">Воспроизведение идёт в официальном плеере YouTube. Ограниченные ролики можно заменить другим результатом поиска.</p></> : activeTrack?.audioUrl ? <audio className="real-audio-preview" controls preload="none" src={activeTrack.audioUrl}>Ваш браузер не поддерживает аудио.</audio> : <><div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div><div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div><div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div></>}
-      </section></div>}
       {notice && <div className="modal-backdrop" onClick={() => setNotice(null)} role="presentation"><section className="notice-modal" role="dialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><button className="modal-close icon-button" onClick={() => setNotice(null)} aria-label="Закрыть"><X size={18} /></button><div className="modal-emblem"><Info size={20} /></div><span className="eyebrow">{notice.label ?? 'Информация'}</span><h2 id="notice-title">{notice.title}</h2><p>{notice.body}</p><button className="button button-primary modal-done" onClick={() => setNotice(null)}>Понятно <Check size={16} /></button></section></div>}
     </div>
   );

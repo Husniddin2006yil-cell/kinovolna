@@ -10,6 +10,7 @@ import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
 import { fetchTmdbWatchProviders } from './tmdb.mjs';
 import { searchYoutubeMusic, YouTubeApiError } from './youtube.mjs';
+import { movieCopyOptions } from './movie-caption.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
@@ -303,7 +304,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
 
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxyHops || false);
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(helmet({ contentSecurityPolicy: false, referrerPolicy: { policy: 'strict-origin-when-cross-origin' } }));
   app.use('/api', (_request, response, next) => {
     response.set('Cache-Control', 'private, no-store');
     response.vary('Origin');
@@ -520,7 +521,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
   async function sendFilmToPrivateChat(chatId, film) {
     if (film.video_file_id) {
       try {
-        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, { protect_content: true, caption: film.title });
+        await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, movieCopyOptions(film.title));
         return;
       } catch {
         await telegramClient.sendMessage(chatId, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');
@@ -698,7 +699,7 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     }
     if (row.video_file_id) {
       try {
-        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, { protect_content: true, caption: row.title });
+        await telegramClient.copyMessage(message.chat.id, row.channel_id, row.message_id, movieCopyOptions(row.title));
         return;
       } catch {
         await telegramClient.sendMessage(message.chat.id, 'Не удалось отправить видео из канала. Попробуйте открыть публикацию через Mini App.');

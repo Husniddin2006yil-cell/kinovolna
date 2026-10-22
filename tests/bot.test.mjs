@@ -228,8 +228,8 @@ const botFilm = (id, title, messageId) => ({
   video_file_id: `file-${messageId}`,
 });
 
-test('private chat title search sends one matching channel video with copyMessage', async (t) => {
-  const film = botFilm('11111111-1111-4111-8111-111111111111', 'Interstellar', 41);
+test('private chat title search sends one matching channel video with a plain clean copy', async (t) => {
+  const film = botFilm('11111111-1111-4111-8111-111111111111', 'Interstellar — @kinovolna https://t.me/kinovolna/41', 41);
   const { base, sent, calls } = await serve(t, { pool: createPool('1', [film]) });
   const response = await deliver(base, messageUpdate(20, testUser, 'interstellar'));
   assert.equal(response.status, 200);
@@ -239,8 +239,11 @@ test('private chat title search sends one matching channel video with copyMessag
     fromChatId: film.channel_id,
     messageId: film.message_id,
     protect_content: true,
-    caption: film.title,
+    caption: 'Interstellar',
+    caption_entities: [],
+    reply_markup: { inline_keyboard: [] },
   });
+  assert.equal(calls.some((call) => call.method === 'forwardMessage'), false);
 });
 
 test('ambiguous bot title search offers private selection buttons and copies the selected movie', async (t) => {
@@ -254,6 +257,26 @@ test('ambiguous bot title search offers private selection buttons and copies the
   assert.equal((await deliver(base, callbackUpdate(22, testUser, buttons[1][0].callback_data))).status, 200);
   const copied = calls.find((call) => call.method === 'copyMessage' && call.parameters.messageId === second.message_id);
   assert.equal(copied?.parameters.caption, second.title);
+});
+
+test('/start film copies the protected video with a plain caption and no source keyboard', async (t) => {
+  const film = botFilm('11111111-1111-4111-8111-111111111111', 'The Thing — Переслано от @movie_archive https://example.test/post', 47);
+  const { base, sent, calls } = await serve(t, { pool: createPool('1', [film]) });
+  const response = await deliver(base, messageUpdate(27, testUser, `/start film_${film.id}`));
+  assert.equal(response.status, 200);
+  assert.equal(sent.length, 0);
+  const copied = calls.find((call) => call.method === 'copyMessage');
+  assert.deepEqual(copied?.parameters, {
+    chatId: testUser.id,
+    fromChatId: film.channel_id,
+    messageId: film.message_id,
+    protect_content: true,
+    caption: 'The Thing',
+    caption_entities: [],
+    reply_markup: { inline_keyboard: [] },
+  });
+  assert.equal('parse_mode' in copied.parameters, false);
+  assert.equal(calls.some((call) => call.method === 'forwardMessage'), false);
 });
 
 test('bot title search reports no match and does not reveal results to an unsubscribed user', async (t) => {

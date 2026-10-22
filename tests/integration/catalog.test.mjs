@@ -125,8 +125,10 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     assert.equal(link.url, `https://t.me/kinovolna_test_bot?start=film_${filmId}`);
     assert.equal(link.mode, 'bot');
     const video = await api(`/api/films/${filmId}/playback`);
-    assert.equal(video.status, 503);
-    assert.equal((await video.json()).error.code, 'video_source_not_configured');
+    assert.equal(video.status, 200);
+    const playback = await video.json();
+    assert.match(playback.url, /\/api\/films\/[^/]+\/stream\?token=/);
+    assert.equal(playback.mimeType, 'video/mp4');
     assert.equal((await api('/api/films/orbit/telegram')).status, 404);
   });
 
@@ -134,7 +136,7 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     const message = { update_id: 10, message: { message_id: 10, date: Math.floor(Date.now() / 1000), chat: { id: testUser.id, type: 'private' }, from: testUser, text: `/start film_${filmId}` } };
     assert.equal((await post(message)).status, 200);
     assert.equal(state.copied.length, 1);
-    assert.deepEqual(state.copied[0], { chatId: testUser.id, fromChatId: testChannel, messageId: '55', options: { protect_content: true, caption: 'Tahrirlangan film' } });
+    assert.deepEqual(state.copied[0], { chatId: testUser.id, fromChatId: testChannel, messageId: '55', options: { protect_content: true, caption: 'Tahrirlangan film', caption_entities: [], reply_markup: { inline_keyboard: [] } } });
     assert.equal((await post(message)).status, 200);
     assert.equal(state.copied.length, 1);
     state.membership = 'left';

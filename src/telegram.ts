@@ -91,6 +91,30 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
   return payload;
 }
 
+function normalizeCatalogTitle(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/\b(?:19|20)\d{2}\b/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function mergeTelegramAndTmdbFilms(tmdbFilms: Film[], telegramFilms: Film[]): Film[] {
+  const merged = new Map<string, Film>();
+  for (const film of tmdbFilms) merged.set(normalizeCatalogTitle(film.title) || film.id, film);
+  for (const telegramFilm of telegramFilms) {
+    const key = normalizeCatalogTitle(telegramFilm.title) || telegramFilm.id;
+    const tmdbFilm = merged.get(key);
+    if (!tmdbFilm) { merged.set(key, telegramFilm); continue; }
+    merged.set(key, {
+      ...tmdbFilm,
+      ...telegramFilm,
+      poster: telegramFilm.poster && !telegramFilm.poster.endsWith('/favicon.svg') ? telegramFilm.poster : tmdbFilm.poster,
+      rating: tmdbFilm.rating,
+      genre: tmdbFilm.genre,
+      description: tmdbFilm.description || telegramFilm.description,
+      source: 'telegram',
+    });
+  }
+  return [...merged.values()];
+}
+
 export async function loadTelegramCatalog() {
   const config = await apiRequest<{ telegramConfigured: boolean; databaseConfigured: boolean; channelConfigured: boolean; tmdbConfigured: boolean }>('/api/config');
   const initData = getTelegramWebApp()?.initData;
@@ -112,7 +136,6 @@ export async function loadTelegramCatalog() {
       if (!page.items.length && offset < total) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог.');
       if (offset > 10000) throw new CatalogApiError(413, 'catalog_too_large', 'Каталог слишком большой для одной загрузки. Нужна серверная постраничная навигация.');
     } while (offset < total);
-    if (films.length) return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
     if (config.tmdbConfigured) {
       const tmdbFilms: Film[] = [];
       let tmdbOffset = 0;
@@ -125,7 +148,7 @@ export async function loadTelegramCatalog() {
         tmdbOffset += page.items.length;
         if (!page.items.length && tmdbOffset < tmdbTotal) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог TMDB.');
       } while (tmdbOffset < tmdbTotal);
-      return { films: tmdbFilms, user: auth.user, startParam: auth.startParam, mode: 'tmdb' as const };
+      return { films: mergeTelegramAndTmdbFilms(tmdbFilms, films), user: auth.user, startParam: auth.startParam, mode: films.length ? 'telegram' as const : 'tmdb' as const };
     }
     return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
   }

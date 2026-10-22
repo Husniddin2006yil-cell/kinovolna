@@ -312,7 +312,7 @@ function App() {
       setCatalogMode(result.mode);
       setCatalogMessage(result.mode === 'tmdb'
         ? (result.films.length ? 'Каталог загружен из TMDB. Постер и описание получены от провайдера метаданных.' : 'Каталог TMDB пока пуст.')
-        : (result.films.length ? 'Каталог загружен из публикаций вашего Telegram-канала.' : 'В базе пока нет публикаций. Опубликуйте фильм в канале после подключения webhook или импортируйте старые записи.'));
+        : (result.films.length ? 'Каталог объединяет TMDB-постеры и реальные публикации Telegram-канала.' : 'В базе пока нет публикаций. Опубликуйте фильм в канале после подключения webhook или импортируйте старые записи.'));
       if (result.startParam?.startsWith('film_')) {
         const film = result.films.find((item) => item.id === result.startParam!.slice(5));
         if (film) setSelectedFilm(film);

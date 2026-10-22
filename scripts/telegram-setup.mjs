@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { readConfig } from '../server/config.mjs';
 import { createTelegramClient } from '../server/telegram.mjs';
+import { getTelegramDiagnostics } from '../server/telegram-diagnostics.mjs';
 
 const command = process.argv[2] || 'check';
 const replaceWebhook = process.argv.includes('--replace-webhook');
@@ -16,41 +17,21 @@ function needTelegram() {
   return createTelegramClient(config.telegramBotToken);
 }
 
-function isChannelAdministrator(member) {
-  return member?.status === 'creator' || member?.status === 'administrator';
-}
-
 async function check() {
   const telegram = needTelegram();
-  const [me, webhook] = await Promise.all([telegram.getMe(), telegram.getWebhookInfo()]);
-  if (!me?.id || !me?.username) throw new Error('Telegram Bot API не вернул данные настроенного бота.');
-  if (config.telegramBotUsername && me.username.toLowerCase() !== config.telegramBotUsername.toLowerCase()) {
+  const diagnostics = await getTelegramDiagnostics(config, telegram);
+  console.log(JSON.stringify(diagnostics, null, 2));
+  if (!diagnostics.botApiReachable) throw new Error(diagnostics.errors.getMe || 'Telegram Bot API check failed.');
+  if (diagnostics.errors.getWebhookInfo) throw new Error(diagnostics.errors.getWebhookInfo);
+  if (config.telegramBotUsername && diagnostics.botUsername?.toLowerCase() !== config.telegramBotUsername.toLowerCase()) {
     throw new Error('TELEGRAM_BOT_USERNAME не соответствует боту из настроенного токена.');
   }
-  let channel = null;
-  let membership = null;
-  if (config.channelConfigured) {
-    channel = await telegram.getChat(config.telegramChannelId);
-    if (channel?.type !== 'channel') throw new Error('TELEGRAM_CHANNEL_ID должен указывать на Telegram-канал.');
-    membership = await telegram.getChatMember(config.telegramChannelId, me.id);
-    if (!isChannelAdministrator(membership)) throw new Error('Бот должен быть администратором TELEGRAM_CHANNEL_ID.');
+  if (config.channelConfigured && diagnostics.channelType !== 'channel') {
+    throw new Error('TELEGRAM_CHANNEL_ID должен указывать на Telegram-канал.');
   }
-  console.log(JSON.stringify({
-    status: config.channelConfigured ? 'ok' : 'bot_api_ok',
-    bot: { id: me.id, username: me.username },
-    channel: config.channelConfigured
-      ? { configured: true, id: config.telegramChannelId, type: channel?.type ?? 'unknown', title: channel?.title ?? null }
-      : { configured: false },
-    botMembership: membership?.status ?? 'not_checked',
-    adminIdsConfigured: config.telegramAdminIds.size,
-    miniAppUrlConfigured: Boolean(config.miniAppUrl),
-    webhook: {
-      configured: Boolean(webhook?.url),
-      pendingUpdateCount: Number.isSafeInteger(webhook?.pending_update_count) ? webhook.pending_update_count : 0,
-      allowedUpdates: Array.isArray(webhook?.allowed_updates) ? webhook.allowed_updates : [],
-      lastErrorDatePresent: Boolean(webhook?.last_error_date),
-    },
-  }, null, 2));
+  if (config.channelConfigured && !diagnostics.botIsChannelAdmin) {
+    throw new Error('Бот должен быть администратором TELEGRAM_CHANNEL_ID.');
+  }
 }
 
 async function webhook() {

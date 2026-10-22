@@ -8,7 +8,7 @@ import { signInitData, testBotToken, testEnvironment, testUser, testWebhookSecre
 
 const welcome = 'Добро пожаловать в КИНОВОЛНА! 🍿 Твой мир кино и музыки начинается здесь. Открывай фильмы и сериалы, находи любимые истории и исследуй мир музыки. Готов выбрать, что посмотреть сегодня?';
 
-function createTelegramStub({ membership = 'administrator' } = {}) {
+function createTelegramStub({ membership = 'administrator', webhookInfo = { url: 'https://kinovolna-test.app/api/telegram/webhook', pending_update_count: 0, allowed_updates: ['message', 'channel_post'] } } = {}) {
   const sent = [];
   const calls = [];
   return {
@@ -29,7 +29,9 @@ function createTelegramStub({ membership = 'administrator' } = {}) {
         return { message_id: calls.length };
       },
       getMe: async () => ({ id: 900001, username: 'kinovolna_test_bot' }),
+      getChat: async () => ({ type: 'channel', title: 'Test Channel' }),
       getChatMember: async () => ({ status: membership }),
+      getWebhookInfo: async () => webhookInfo,
       getFile: async (fileId) => {
         calls.push({ method: 'getFile', parameters: { file_id: fileId } });
         return { file_path: 'photos/poster.jpg' };
@@ -69,8 +71,8 @@ function createPool(filmCount = '0', films = []) {
   return { statements, connect: async () => client, query: client.query.bind(client) };
 }
 
-async function serve(t, { environment = {}, pool = null, membership = 'administrator' } = {}) {
-  const telegram = createTelegramStub({ membership });
+async function serve(t, { environment = {}, pool = null, membership = 'administrator', webhookInfo } = {}) {
+  const telegram = createTelegramStub({ membership, ...(webhookInfo ? { webhookInfo } : {}) });
   const config = readConfig(testEnvironment({ PUBLIC_BASE_URL: 'https://kinovolna-test.app', ...environment }));
   const server = createApp({ config, pool, telegram: telegram.client }).listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -274,6 +276,35 @@ test('subscription prompt links to the channel and rechecks membership from a pr
   assert.equal((await deliver(base, callbackUpdate(26, testUser, 'membership_recheck'))).status, 200);
   assert.match(sent.at(-1).text, /Подписка подтверждена/);
   assert.ok(calls.some((call) => call.method === 'answerCallbackQuery'));
+});
+
+test('telegram diagnostics are admin-only and redact webhook error details', async (t) => {
+  const tokenLike = '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef';
+  const { base } = await serve(t, {
+    webhookInfo: {
+      url: 'https://kinovolna-test.app/api/telegram/webhook',
+      pending_update_count: 3,
+      allowed_updates: ['message', 'channel_post'],
+      last_error_date: 1_760_000_000,
+      last_error_message: `401 Unauthorized; rejected token=${tokenLike} at https://private.example/hook?secret=hidden`,
+    },
+  });
+  const endpoint = `${base}/api/admin/telegram/diagnostics`;
+  assert.equal((await fetch(endpoint)).status, 401);
+  const notAdmin = await fetch(endpoint, { headers: { 'X-Telegram-Init-Data': signInitData({ user: { id: 111, first_name: 'Visitor' } }) } });
+  assert.equal(notAdmin.status, 403);
+
+  const response = await fetch(endpoint, { headers: { 'X-Telegram-Init-Data': signInitData() } });
+  assert.equal(response.status, 200);
+  const diagnostics = await response.json();
+  assert.equal(diagnostics.botApiReachable, true);
+  assert.equal(diagnostics.botIsChannelAdmin, true);
+  assert.equal(diagnostics.webhook.configured, true);
+  assert.equal(diagnostics.webhook.matchesExpectedUrl, true);
+  assert.equal(diagnostics.webhook.pendingUpdateCount, 3);
+  assert.match(diagnostics.webhook.lastErrorMessage, /401 Unauthorized/);
+  assert.doesNotMatch(JSON.stringify(diagnostics), new RegExp(tokenLike));
+  assert.doesNotMatch(diagnostics.webhook.lastErrorMessage, /private\.example|hidden/);
 });
 
 test('channel media-group updates retain both the movie caption and Telegram poster/video IDs', async (t) => {

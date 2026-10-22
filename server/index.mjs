@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
@@ -45,6 +46,13 @@ export async function startServer() {
   const host = runtime.config.nodeEnv === 'production' ? '0.0.0.0' : '127.0.0.1';
   const server = runtime.app.listen(runtime.config.port, host, () => {
     console.log(`API запущен: ${host}:${runtime.config.port}`);
+    if (runtime.config.nodeEnv === 'production') {
+      const diagnostic = spawn(process.execPath, [path.join(process.cwd(), 'scripts/telegram-setup.mjs'), 'check'], { env: process.env, stdio: 'inherit' });
+      diagnostic.on('error', () => console.warn('[telegram-diagnostic] Read-only check could not be started; service remains online.'));
+      diagnostic.on('exit', (code) => {
+        if (code !== 0) console.warn(`[telegram-diagnostic] Read-only check exited with code ${code}; service remains online.`);
+      });
+    }
   });
   const shutdown = async () => {
     server.close();

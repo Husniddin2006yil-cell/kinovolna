@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
+import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TELEGRAM_USERNAME_RE = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
@@ -776,6 +777,14 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     channelConfigured: config.channelConfigured,
     audioRecognitionConfigured: Boolean(config.audioRecognitionApiKey),
     tmdbConfigured: config.tmdbConfigured,
+  }));
+
+  app.get('/api/admin/telegram/diagnostics', asyncRoute(async (request, response) => {
+    const auth = authenticate(request);
+    if (!config.telegramAdminIds.has(String(auth.user.id))) {
+      throw new RequestError(403, 'admin_required', 'Недостаточно прав.');
+    }
+    response.json(await getTelegramDiagnostics(config, telegramClient));
   }));
 
   app.post('/api/telegram/auth', asyncRoute(async (request, response) => {

@@ -30,8 +30,27 @@ export async function migrate(pool) {
         received_at timestamptz NOT NULL DEFAULT now()
       )
     `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tmdb_catalog (
+        tmdb_id integer NOT NULL,
+        media_type text NOT NULL CHECK (media_type IN ('movie', 'tv')),
+        title text NOT NULL,
+        original_title text NOT NULL DEFAULT '',
+        description text NOT NULL DEFAULT '',
+        year integer NOT NULL DEFAULT 0,
+        rating numeric(3,1) NOT NULL DEFAULT 0,
+        genre text NOT NULL DEFAULT 'Не указан',
+        poster text,
+        backdrop text,
+        source_url text NOT NULL,
+        synced_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (tmdb_id, media_type)
+      )
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS films_title_search_idx ON films USING gin (to_tsvector(\'simple\', title || \' \' || description))');
     await client.query('CREATE INDEX IF NOT EXISTS films_source_date_idx ON films (source_date DESC NULLS LAST, created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_rating_idx ON tmdb_catalog (rating DESC, year DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS tmdb_catalog_title_idx ON tmdb_catalog (title)');
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);

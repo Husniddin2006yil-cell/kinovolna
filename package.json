@@ -16,6 +16,7 @@
     "bot:start": "node bot/index.mjs",
     "bot:check": "node --check bot/index.mjs",
     "db:migrate": "node scripts/migrate.mjs",
+    "tmdb:sync": "node scripts/tmdb-sync.mjs",
     "telegram:check": "node scripts/telegram-setup.mjs check",
     "telegram:webhook": "node scripts/telegram-setup.mjs webhook",
     "telegram:menu": "node scripts/telegram-setup.mjs menu",

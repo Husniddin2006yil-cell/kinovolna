@@ -32,8 +32,8 @@ import {
   SkipBack,
   SkipForward,
 } from 'lucide-react';
-import { films as demoFilms, generatedArt, tracks, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, type TelegramUser } from './telegram';
+import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
+import { getTelegramWebApp, loadMusicCatalog, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, type TelegramUser } from './telegram';
 import './integration.css';
 
 type Section = 'home' | 'music' | 'movies' | 'search' | 'profile';
@@ -239,7 +239,7 @@ function App() {
   const [query, setQuery] = useState('');
   const [musicQuery, setMusicQuery] = useState('');
   const [films, setFilms] = useState<FilmItem[]>([]);
-  const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'demo' | 'blocked'>('loading');
+  const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'tmdb' | 'demo' | 'blocked'>('loading');
   const [catalogMessage, setCatalogMessage] = useState('');
   const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null);
   const [telegramBusy, setTelegramBusy] = useState(false);
@@ -250,6 +250,8 @@ function App() {
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>(['echoes']);
   const [musicFavorites, setMusicFavorites] = useState<string[]>(['bluehour']);
+  const [musicTracks, setMusicTracks] = useState<Track[]>([]);
+  const [musicCatalogError, setMusicCatalogError] = useState<string | null>(null);
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>(['neon', 'city']);
   const [recentTrackIds, setRecentTrackIds] = useState<string[]>([]);
@@ -271,8 +273,10 @@ function App() {
       const result = await loadTelegramCatalog();
       setFilms(result.films);
       setTelegramUser(result.user);
-      setCatalogMode('telegram');
-      setCatalogMessage(result.films.length ? 'Каталог загружен из публикаций вашего Telegram-канала.' : 'В базе пока нет публикаций. Опубликуйте фильм в канале после подключения webhook или импортируйте старые записи.');
+      setCatalogMode(result.mode);
+      setCatalogMessage(result.mode === 'tmdb'
+        ? (result.films.length ? 'Каталог загружен из TMDB. Постер и описание получены от провайдера метаданных.' : 'Каталог TMDB пока пуст.')
+        : (result.films.length ? 'Каталог загружен из публикаций вашего Telegram-канала.' : 'В базе пока нет публикаций. Опубликуйте фильм в канале после подключения webhook или импортируйте старые записи.'));
       if (result.startParam?.startsWith('film_')) {
         const film = result.films.find((item) => item.id === result.startParam!.slice(5));
         if (film) setSelectedFilm(film);
@@ -288,6 +292,12 @@ function App() {
     getTelegramWebApp()?.ready?.();
     void reloadCatalog();
   }, [reloadCatalog]);
+
+  useEffect(() => {
+    let active = true;
+    void loadMusicCatalog().then((items) => { if (active) { setMusicTracks(items); setMusicCatalogError(null); } }).catch((error) => { if (active) setMusicCatalogError(error instanceof Error ? error.message : 'Музыкальный каталог недоступен.'); });
+    return () => { active = false; };
+  }, []);
 
   const showDemoCatalog = () => {
     setFilms(demoFilms);
@@ -363,7 +373,7 @@ function App() {
 
   const filteredTracks = useMemo(() => {
     const normalized = musicQuery.trim().toLocaleLowerCase();
-    return tracks.filter((track) => {
+    return musicTracks.filter((track) => {
       const matchesQuery = !normalized || [track.title, track.artist, track.album, track.tone].some((value) => value.toLocaleLowerCase().includes(normalized));
       const matchesMode = musicMode === 'all' || musicFavorites.includes(track.id);
       const matchesMood = !selectedMusicMood || track.moods.includes(selectedMusicMood);
@@ -411,7 +421,7 @@ function App() {
 
   const handleWatchAction = async (film: FilmItem) => {
     if (film.source !== 'telegram') {
-      openUnavailable('Источник онлайн-видео не подключён', 'Демо-карточка не содержит видео. Пост Telegram также не является прямой ссылкой для HTML5-плеера.', 'Нужен реальный видеосервис');
+      openUnavailable('Источник онлайн-видео не подключён', film.source === 'tmdb' ? 'TMDB предоставляет метаданные, но не видеопоток. Подключите легального видеопровайдера для просмотра.' : 'Демо-карточка не содержит видео. Пост Telegram также не является прямой ссылкой для HTML5-плеера.', 'Нужен реальный видеосервис');
       return;
     }
     const result = await requestFilmPlayback(film.id);
@@ -429,7 +439,8 @@ function App() {
   const chooseTrack = (track: Track) => {
     setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
     setActiveTrack(track);
-    openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist} — пример каталога. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток. Сейчас этот экран не запускает музыку.`, 'Музыка · ждёт подключения');
+    if (track.audioUrl) setPlayerOpen(true);
+    else openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist}. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток.`, 'Музыка · источник недоступен');
   };
 
   const handleMusicRecognition = async () => {
@@ -576,9 +587,9 @@ function App() {
   );
 
   const renderMusic = () => {
-    const recentlySelectedTracks = recentTrackIds.map((id) => tracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
+    const recentlySelectedTracks = recentTrackIds.map((id) => musicTracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
     if (selectedArtist) {
-      const artistTracks = tracks.filter((track) => track.artist === selectedArtist);
+      const artistTracks = musicTracks.filter((track) => track.artist === selectedArtist);
       const isFollowed = followedArtists.includes(selectedArtist);
       return (
         <section className="page-section music-page artist-page">
@@ -607,17 +618,17 @@ function App() {
         <div className="music-toolbar"><div><div className="eyebrow">Подборки для разного настроения</div><h2>Плейлисты</h2></div><button className="text-action" onClick={() => openUnavailable('Плейлисты-примеры', 'Эти карточки показывают будущую библиотеку. Реальное сохранение пользовательских плейлистов будет добавлено вместе с backend.')}>Все подборки <ArrowRight size={15} /></button></div>
         <div className="playlist-grid">{playlists.map((playlist) => <button key={playlist.title} className={`playlist-card ${playlist.className}`} onClick={() => openUnavailable(playlist.title, 'Это пример плейлиста. Для реального прослушивания нужны разрешённые аудиофайлы или потоковый источник.', 'Источник музыки не подключён')}><span className="playlist-disc"><AudioLines size={20} /></span><span className="playlist-title">{playlist.title}</span><span className="playlist-subtitle">{playlist.subtitle} · {playlist.tracks} треков</span><span className="playlist-arrow"><Play size={14} fill="currentColor" /></span></button>)}</div>
 
-        <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Тестовый каталог</Tag></div>
-        <div className="artist-grid">{[...new Set(tracks.map((track) => track.artist))].map((artist, index) => <button key={artist} className="artist-card" onClick={() => setSelectedArtist(artist)}><span className={`artist-avatar artist-avatar-${index + 1}`}><AudioLines size={20} /></span><strong>{artist}</strong><span>{index === 0 ? 'Инди-поп' : index === 1 ? 'Электроника' : 'Альтернатива'}</span></button>)}</div>
+        <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Deezer previews</Tag></div>
+        <div className="artist-grid">{[...new Set(musicTracks.map((track) => track.artist))].map((artist, index) => <button key={artist} className="artist-card" onClick={() => setSelectedArtist(artist)}><span className={`artist-avatar artist-avatar-${index + 1}`}><AudioLines size={20} /></span><strong>{artist}</strong><span>Deezer</span></button>)}</div>
 
-        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Трек, альбом или исполнитель</div><h2>Музыкальная библиотека</h2></div><Tag>Аудиоисточник не подключён</Tag></div>
+        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Трек, альбом или исполнитель</div><h2>Музыкальная библиотека</h2></div><Tag>{musicCatalogError ? 'Источник недоступен' : 'Deezer · 30 сек preview'}</Tag></div>
         <form className="large-search music-search" onSubmit={(event) => event.preventDefault()}><Search size={18} /><input value={musicQuery} onChange={(event) => setMusicQuery(event.target.value)} placeholder="Найти песню, альбом или исполнителя..." aria-label="Поиск музыки" /><button type="button" className="music-favorite-filter" onClick={() => setMusicMode((mode) => mode === 'all' ? 'favorites' : 'all')} aria-label="Переключить избранные треки"><Heart size={15} fill={musicMode === 'favorites' ? 'currentColor' : 'none'} /></button></form>
         <div className="music-list-toolbar"><div className="chip-row"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все треки</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}><Heart size={12} /> Избранное</button>{selectedMusicMood && <button className="filter-chip active" onClick={() => setSelectedMusicMood(null)}>Волна: {moodWaves.find((mood) => mood.id === selectedMusicMood)?.title ?? 'настроение'} <X size={12} /></button>}</div><span>{filteredTracks.length} треков</span></div>
         {renderTrackList(filteredTracks)}
         <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Запишем до 8 секунд с микрофона и отправим фрагмент в AudD. Результат появляется только при реальном совпадении.</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}>{recognitionBusy ? 'Слушаем…' : 'Распознать'} <ChevronRight size={14} /></button></div>
         <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">Ваша история</div><h2>Недавно слушали</h2></div><Tag>Демо · последние выборы</Tag></div>
         {recentlySelectedTracks.length ? renderTrackList(recentlySelectedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Выбранные треки появятся здесь. В прототипе это демо-история, а не подтверждённое воспроизведение.</span></div>}
-        <p className="recent-music-note">После подключения разрешённого аудио здесь будут отображаться последние реально прослушанные песни.</p>
+        <p className="recent-music-note">{musicCatalogError ?? 'Доступны легальные 30-секундные preview Deezer. Полные треки не скачиваются и не подменяются фиктивными файлами.'}</p>
       </section>
     );
   };
@@ -625,7 +636,7 @@ function App() {
   const renderProfile = () => {
     const savedFilms = films.filter((film) => favorites.includes(film.id));
     const recentFilms = history.map((id) => films.find((film) => film.id === id)).filter((film): film is FilmItem => Boolean(film));
-    const savedTracks = tracks.filter((track) => musicFavorites.includes(track.id));
+    const savedTracks = musicTracks.filter((track) => musicFavorites.includes(track.id));
     return (
       <section className="page-section profile-page">
         <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и открытые карточки. Избранное хранится на этом устройстве.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Профиль и настройки', 'Вход подтверждается сервером через Telegram initData. Избранное пока сохраняется локально, а не в аккаунте. Пароль Telegram не требуется.', 'Информация')} aria-label="Настройки"><Settings2 size={19} /></button></div>
@@ -649,7 +660,7 @@ function App() {
           <div className="detail-facts"><span><Star size={14} fill="currentColor" /> {film.rating}</span><i />{film.year || 'Год не указан'}<i />{film.duration}<i />{film.genre}</div>
           <p>{film.description}</p>
           <div className="detail-actions">
-            <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Проверяем доступ…' : 'Получить в Telegram'}</button>
+            {film.source === 'telegram' && <button className="button button-primary" disabled={telegramBusy} onClick={() => void handleTelegramAction(film)}><ArrowRight size={16} /> {telegramBusy ? 'Проверяем доступ…' : 'Получить в Telegram'}</button>}
             <button className="button button-glass" onClick={() => void handleWatchAction(film)}><Play size={15} fill="currentColor" /> Смотреть онлайн</button>
             <button className={`icon-button detail-fav ${favorites.includes(film.id) ? 'is-favorite' : ''}`} onClick={() => toggleFilmFavorite(film.id)} aria-label="В избранное"><Heart size={18} fill={favorites.includes(film.id) ? 'currentColor' : 'none'} /></button>
           </div>
@@ -657,7 +668,7 @@ function App() {
         </div>
       </div>
       {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Первый сезон</div><h2>Серии</h2></div><button className="sort-button">Сезон 1 <ChevronDown size={14} /></button></div><div className="episode-list">{film.episodes?.map((episode, index) => <button key={episode} className="episode-row" onClick={() => openUnavailable('Видео пока не подключено', 'Источник видео серии и интеграция с Telegram-ботом пока не настроены.')}><span className="episode-number">{String(index + 1).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{episode}</strong><span className="episode-runtime">42 мин</span><ChevronRight size={16} /></button>)}</div></section>}
-      <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с реальной публикацией канала. Доступ проверяется сервером; отдельный источник онлайн-видео не подключён.' : 'Сейчас показан пример каталога без соответствующего поста в канале и без видеопотока.'}</span></div>
+      <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с реальной публикацией канала. Доступ проверяется сервером; отдельный источник онлайн-видео не подключён.' : film.source === 'tmdb' ? 'Метаданные и постер получены из TMDB. TMDB не предоставляет сам фильм; легальный видеопровайдер ещё не подключён.' : 'Сейчас показан демонстрационный каталог без соответствующего поста в канале и без видеопотока.'}</span></div>
     </section>
   );
 
@@ -679,17 +690,17 @@ function App() {
       <main className={`main-content ${selectedFilm ? 'main-detail' : ''}`}>
         {!selectedFilm && section !== 'home' && <div className="mobile-page-label"><Logo /><span>{section === 'music' ? 'Музыка' : section === 'movies' ? 'Кино' : section === 'search' ? 'Поиск' : 'Профиль'}</span></div>}
         <section className={`catalog-status catalog-status-${catalogMode}`} role="status" aria-live="polite">
-          <div><strong>{catalogMode === 'loading' ? 'Загружаем каталог…' : catalogMode === 'telegram' ? 'Telegram-каталог' : catalogMode === 'demo' ? 'Демо-режим' : 'Каталог не подключён'}</strong><p>{catalogMessage || 'Проверяем backend и Telegram-вход.'}</p></div>
-          <div className="catalog-status-actions"><button className="button button-glass" disabled={catalogMode === 'loading'} onClick={() => void reloadCatalog()}>Обновить каталог</button>{catalogMode !== 'telegram' && catalogMode !== 'demo' && <button className="button button-glass" onClick={showDemoCatalog}>Посмотреть демо</button>}</div>
+          <div><strong>{catalogMode === 'loading' ? 'Загружаем каталог…' : catalogMode === 'telegram' ? 'Telegram-каталог' : catalogMode === 'tmdb' ? 'Каталог TMDB' : catalogMode === 'demo' ? 'Демо-режим' : 'Каталог не подключён'}</strong><p>{catalogMessage || 'Проверяем backend и источник каталога.'}</p></div>
+          <div className="catalog-status-actions"><button className="button button-glass" disabled={catalogMode === 'loading'} onClick={() => void reloadCatalog()}>Обновить каталог</button>{!['telegram', 'tmdb', 'demo'].includes(catalogMode) && <button className="button button-glass" onClick={showDemoCatalog}>Посмотреть демо</button>}</div>
         </section>
         {content}
-        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : 'Для реального каталога нужна настройка Telegram'}</span></footer>
+        <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : catalogMode === 'tmdb' ? 'Метаданные TMDB · легальный видеопровайдер не подключён' : 'Для реального каталога нужна настройка источника'}</span></footer>
       </main>
       <div className="mini-player">
         <button className={`mini-art ${activeTrack?.coverStyle ?? ''}`} onClick={() => setPlayerOpen(true)} aria-label="Открыть плеер"><AudioLines size={17} /></button>
         <button className="mini-info" onClick={() => setPlayerOpen(true)}><strong>{activeTrack?.title ?? 'Выберите музыку'}</strong><span>{activeTrack ? `${activeTrack.artist} · источник не подключён` : 'Подключение аудиоисточника впереди'}</span></button>
         <div className="mini-progress"><span /></div>
-        <button className="mini-play" onClick={() => openUnavailable('Аудио пока не подключено', 'В этой версии нет аудиофайла или потока для воспроизведения. Плеер заработает после подключения разрешённого источника.', 'Нужен аудиоисточник')} aria-label="Статус аудиоисточника"><Play size={16} fill="currentColor" /></button>
+        <button className="mini-play" onClick={() => activeTrack?.audioUrl ? setPlayerOpen(true) : openUnavailable('Аудио пока не подключено', 'В этой версии нет аудиофайла или потока для воспроизведения. Плеер заработает после подключения разрешённого источника.', 'Нужен аудиоисточник')} aria-label="Статус аудиоисточника"><Play size={16} fill="currentColor" /></button>
         <button className="mini-expand" onClick={() => setPlayerOpen(true)} aria-label="Открыть полноэкранный плеер"><Maximize2 size={15} /></button>
       </div>
       <nav className="mobile-nav" aria-label="Мобильная навигация">
@@ -698,12 +709,10 @@ function App() {
       {playerOpen && <div className="player-overlay" onClick={() => setPlayerOpen(false)} role="presentation"><section className="player-modal" role="dialog" aria-modal="true" aria-label="Полноэкранный плеер" onClick={(event) => event.stopPropagation()}>
         <button className="player-close icon-button" onClick={() => setPlayerOpen(false)} aria-label="Закрыть плеер"><X size={19} /></button>
         <div className={`player-cover ${activeTrack?.coverStyle ?? 'cover-moon'}`}><AudioLines size={45} /></div>
-        <Tag><Disc3 size={13} /> ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН</Tag>
+        <Tag><Disc3 size={13} /> {activeTrack?.audioUrl ? 'DEEZER · PREVIEW' : 'ИСТОЧНИК АУДИО НЕ ПОДКЛЮЧЁН'}</Tag>
         <h2>{activeTrack?.title ?? 'Выберите трек'}</h2>
         <button className="player-artist" onClick={() => { if (activeTrack) { setPlayerOpen(false); setSelectedArtist(activeTrack.artist); setSection('music'); } }}>{activeTrack?.artist ?? 'КИНОВОЛНА'}</button>
-        <div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div>
-        <div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div>
-        <div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div>
+        {activeTrack?.audioUrl ? <audio className="real-audio-preview" controls preload="none" src={activeTrack.audioUrl}>Ваш браузер не поддерживает аудио.</audio> : <><div className="player-timeline"><span>--:--</span><input type="range" min="0" max="100" defaultValue="0" disabled aria-label="Позиция воспроизведения" /><span>{activeTrack?.duration ?? '--:--'}</span></div><div className="player-controls"><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Предыдущий трек"><SkipBack size={19} fill="currentColor" /></button><button className="player-main-control" onClick={() => openUnavailable('Аудио не подключено', 'Для воспроизведения нужен реальный аудиофайл или разрешённый поток.')} aria-label="Воспроизвести"><Play size={19} fill="currentColor" /></button><button onClick={() => openUnavailable('Аудио не подключено', 'Перемотка станет доступна после подключения разрешённого аудиопотока.')} aria-label="Следующий трек"><SkipForward size={19} fill="currentColor" /></button></div><div className="player-volume"><Volume2 size={16} /><input type="range" min="0" max="100" defaultValue="60" disabled aria-label="Громкость" /><span>Воспроизведение появится после подключения аудиоисточника</span></div></>}
       </section></div>}
       {notice && <div className="modal-backdrop" onClick={() => setNotice(null)} role="presentation"><section className="notice-modal" role="dialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><button className="modal-close icon-button" onClick={() => setNotice(null)} aria-label="Закрыть"><X size={18} /></button><div className="modal-emblem"><Info size={20} /></div><span className="eyebrow">{notice.label ?? 'Информация'}</span><h2 id="notice-title">{notice.title}</h2><p>{notice.body}</p><button className="button button-primary modal-done" onClick={() => setNotice(null)}>Понятно <Check size={16} /></button></section></div>}
     </div>

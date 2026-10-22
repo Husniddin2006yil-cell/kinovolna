@@ -580,12 +580,80 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     databaseConfigured: config.databaseConfigured,
     channelConfigured: config.channelConfigured,
     audioRecognitionConfigured: Boolean(config.audioRecognitionApiKey),
+    tmdbConfigured: config.tmdbConfigured,
   }));
 
   app.post('/api/telegram/auth', asyncRoute(async (request, response) => {
     if (!needs(response, Boolean(config.telegramConfigured && telegramClient))) return;
     const auth = verifyTelegramInitData(request.body?.initData, config.telegramBotToken, config.telegramInitDataMaxAge);
     response.json(auth);
+  }));
+
+  app.get('/api/catalog', asyncRoute(async (request, response) => {
+    if (!needs(response, Boolean(pool && config.databaseConfigured && config.tmdbConfigured))) return;
+    const limit = parsePagination(request.query.limit, 24, 1, 100, 'limit');
+    const offset = parsePagination(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
+    const q = request.query.q === undefined ? '' : typeof request.query.q === 'string' && request.query.q.length <= 200 ? request.query.q.trim() : null;
+    if (q === null) throw new RequestError(400, 'invalid_search', 'Поисковый запрос некорректен.');
+    const category = request.query.category === undefined ? 'popular' : request.query.category;
+    if (!['popular', 'new', 'series'].includes(category)) throw new RequestError(400, 'invalid_category', 'Категория каталога некорректна.');
+    const kindClause = category === 'series' ? "AND media_type = 'tv'" : category === 'new' ? "AND media_type = 'movie'" : '';
+    const orderClause = category === 'new' ? 'year DESC, rating DESC' : 'rating DESC, year DESC';
+    const values = [q, limit, offset];
+    const where = `WHERE ($1 = '' OR title ILIKE '%' || $1 || '%' OR original_title ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%') ${kindClause}`;
+    const [items, count] = await Promise.all([
+      pool.query(`SELECT tmdb_id, media_type, title, original_title, description, year, rating, genre, poster FROM tmdb_catalog ${where} ORDER BY ${orderClause} LIMIT $2 OFFSET $3`, values),
+      pool.query(`SELECT COUNT(*)::bigint AS total FROM tmdb_catalog ${where}`, [q]),
+    ]);
+    if (!Number(count.rows[0].total) && !q) throw new RequestError(503, 'catalog_not_synced', 'Каталог TMDB ещё не синхронизирован.');
+    response.json({
+      items: items.rows.map((row) => ({
+        id: `tmdb-${row.media_type}-${row.tmdb_id}`,
+        title: row.title,
+        originalTitle: row.original_title || row.title,
+        year: Number(row.year) || 0,
+        rating: Number(row.rating || 0).toFixed(1),
+        genre: row.genre || 'Не указан',
+        duration: '—',
+        description: row.description || 'Описание отсутствует в TMDB.',
+        poster: row.poster || '/favicon.svg',
+        kind: row.media_type === 'tv' ? 'Сериал' : 'Фильм',
+        source: 'tmdb',
+      })),
+      pagination: { total: Number(count.rows[0].total), limit, offset },
+      provider: 'TMDB',
+      category,
+    });
+  }));
+
+  app.get('/api/music/catalog', asyncRoute(async (request, response) => {
+    const query = request.query.q === undefined ? '' : typeof request.query.q === 'string' && request.query.q.length <= 120 ? request.query.q.trim() : null;
+    if (query === null) throw new RequestError(400, 'invalid_search', 'Поисковый запрос музыки некорректен.');
+    const url = new URL(query ? 'https://api.deezer.com/search' : 'https://api.deezer.com/chart/0/tracks');
+    url.searchParams.set('limit', '30');
+    if (query) url.searchParams.set('q', query);
+    let providerResponse;
+    try {
+      providerResponse = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+    } catch {
+      return sendError(response, 502, 'music_catalog_unavailable', 'Музыкальный каталог временно недоступен.');
+    }
+    const payload = await providerResponse.json().catch(() => null);
+    if (!providerResponse.ok || !payload || !Array.isArray(payload.data)) return sendError(response, 502, 'music_catalog_unavailable', 'Музыкальный каталог не вернул данные.');
+    const items = payload.data.filter((item) => typeof item.preview === 'string' && /^https:\/\//.test(item.preview) && typeof item.title === 'string' && typeof item.artist?.name === 'string').map((item, index) => ({
+      id: `deezer-${item.id}`,
+      title: item.title,
+      artist: item.artist.name,
+      album: item.album?.title || 'Deezer',
+      duration: `${Math.floor(Number(item.duration || 0) / 60)}:${String(Number(item.duration || 0) % 60).padStart(2, '0')}`,
+      coverStyle: ['cover-moon', 'cover-blue', 'cover-dusk', 'cover-green'][index % 4],
+      tone: 'Deezer preview',
+      moods: ['happy', 'road'],
+      audioUrl: item.preview,
+      sourceUrl: typeof item.link === 'string' ? item.link : 'https://www.deezer.com/',
+      source: 'deezer',
+    }));
+    response.json({ provider: 'Deezer', previewSeconds: 30, items });
   }));
 
   app.get('/api/films', asyncRoute(async (request, response) => {

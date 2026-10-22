@@ -11,7 +11,7 @@ export type Film = {
   badge?: string;
   kind: 'Фильм' | 'Сериал';
   episodes?: string[];
-  source?: 'telegram';
+  source?: 'telegram' | 'tmdb' | 'demo';
   channelId?: string;
   messageId?: number;
 };
@@ -25,6 +25,9 @@ export type Track = {
   coverStyle: string;
   tone: string;
   moods: string[];
+  audioUrl?: string;
+  sourceUrl?: string;
+  source?: 'deezer' | 'demo';
 };
 
 const poster = {

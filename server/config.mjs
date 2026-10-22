@@ -145,11 +145,13 @@ export function readConfig(env = process.env) {
     telegramChannelInviteUrl: inviteIsTelegram ? channelInviteUrl : null,
     telegramInitDataMaxAge: parseMaxAge(env.TELEGRAM_INIT_DATA_MAX_AGE),
     audioRecognitionApiKey: nonEmpty(env.AUDIO_RECOGNITION_API_KEY),
+    tmdbApiKey: nonEmpty(env.TMDB_API_KEY),
     publicBaseUrl: validPublicHttpsUrl(nonEmpty(env.PUBLIC_BASE_URL)),
     miniAppUrl: validPublicHttpsUrl(nonEmpty(env.MINI_APP_URL)),
     telegramConfigured: Boolean(botToken),
     databaseConfigured: Boolean(validDatabaseUrl(nonEmpty(env.DATABASE_URL))),
     channelConfigured: Boolean(channelCandidate && CHANNEL_ID_RE.test(channelCandidate) && isSignedBigInt(channelCandidate)),
+    tmdbConfigured: Boolean(nonEmpty(env.TMDB_API_KEY)),
   });
 }
 

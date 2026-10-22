@@ -1,4 +1,4 @@
-import type { Film } from './data';
+import type { Film, Track } from './data';
 
 export type FilmActionResult =
   | { ok: true; url?: string }
@@ -79,7 +79,12 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 export async function loadTelegramCatalog() {
-  const config = await apiRequest<{ telegramConfigured: boolean; databaseConfigured: boolean; channelConfigured: boolean }>('/api/config');
+  const config = await apiRequest<{ telegramConfigured: boolean; databaseConfigured: boolean; channelConfigured: boolean; tmdbConfigured: boolean }>('/api/config');
+  if (config.databaseConfigured && config.tmdbConfigured) {
+    const page = await apiRequest<{ items: Film[]; pagination: { total: number; limit: number; offset: number } }>('/api/catalog?limit=100&category=popular');
+    if (!Array.isArray(page.items) || !page.pagination) throw new CatalogApiError(502, 'invalid_catalog', 'Backend вернул некорректный каталог TMDB.');
+    return { films: page.items, user: null, startParam: undefined, mode: 'tmdb' as const };
+  }
   if (!config.telegramConfigured || !config.databaseConfigured || !config.channelConfigured) {
     throw new CatalogApiError(503, 'configuration_required', 'Нужны серверный токен бота, ID канала и PostgreSQL. Демо-каталог доступен отдельно.');
   }
@@ -104,7 +109,7 @@ export async function loadTelegramCatalog() {
     if (!page.items.length && offset < total) throw new CatalogApiError(502, 'invalid_pagination', 'Не удалось загрузить полный каталог.');
     if (offset > 10000) throw new CatalogApiError(413, 'catalog_too_large', 'Каталог слишком большой для одной загрузки. Нужна серверная постраничная навигация.');
   } while (offset < total);
-  return { films, user: auth.user, startParam: auth.startParam };
+  return { films, user: auth.user, startParam: auth.startParam, mode: 'telegram' as const };
 }
 
 // The server alone resolves actual indexed posts. Never build links for demo IDs.
@@ -158,4 +163,10 @@ export async function recognizeMusicSample(sample: Blob): Promise<MusicRecogniti
     throw new CatalogApiError(response.status, payload?.error?.code ?? 'recognition_failed', payload?.error?.message ?? 'Не удалось распознать аудиозапись.');
   }
   return payload;
+}
+
+export async function loadMusicCatalog(query = ''): Promise<Track[]> {
+  const path = query.trim() ? `/api/music/catalog?q=${encodeURIComponent(query.trim())}` : '/api/music/catalog';
+  const payload = await apiRequest<{ items: Track[] }>(path);
+  return Array.isArray(payload.items) ? payload.items : [];
 }

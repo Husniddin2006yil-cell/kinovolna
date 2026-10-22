@@ -72,7 +72,7 @@ test('unconfigured API is honest, protected, JSON-only and does not expose secre
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await fetch(`${base}/api/health`)).status, 200);
   assert.equal((await fetch(`${base}/api/ready`)).status, 503);
-  assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { telegramConfigured: false, databaseConfigured: false, channelConfigured: false, audioRecognitionConfigured: false });
+  assert.deepEqual(await (await fetch(`${base}/api/config`)).json(), { telegramConfigured: false, databaseConfigured: false, channelConfigured: false, audioRecognitionConfigured: false, tmdbConfigured: false });
   for (const path of ['/api/films', '/api/films/example/telegram']) assert.equal((await fetch(`${base}${path}`)).status, 503);
   const response = await fetch(`${base}/api/telegram/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: signed() }) });
   assert.equal(response.status, 503);

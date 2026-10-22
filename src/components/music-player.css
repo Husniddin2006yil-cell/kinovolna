@@ -27,7 +27,6 @@
   .top-search input, .large-search input { font-size: 16px; }
   .top-search { max-width: 110px; }
   .topbar-actions { min-width: 0; }
-  .large-search .youtube-search-button { width: auto; min-width: 68px; flex-shrink: 0; }
 }
 /* Telegram's initial sheet height is a ceiling; keyboard changes only shrink the usable area. */
 html.telegram-viewport, .telegram-viewport body, .telegram-viewport #root { height: var(--app-viewport-height); min-height: 0; overflow: hidden; }

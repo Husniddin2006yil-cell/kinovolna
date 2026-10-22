@@ -16,7 +16,7 @@ The official API page says its public API needs no API key or account and expose
 
 ## Decision for the current app
 
-YouTube search remains metadata/external-link only; no YouTube video is embedded for music playback and no audio is extracted. The in-app audio catalog remains Deezer’s 30-second licensed preview plus a small statically curated Wikimedia Commons open archive list with per-track source and status links. This satisfies the audio-only UI without pretending that YouTube search grants audio playback rights. A future Jamendo/FMA/Free To Use integration needs per-track license metadata, attribution rendering, provider terms acceptance, and an explicit credential/license decision.
+The paragraph above records the implementation before the 2026-10-22 music overhaul. It is superseded by the current decision below.
 
 [1]: https://developer.jamendo.com/v3.0/docs "Jamendo API documentation"
 [2]: https://devportal.jamendo.com/api_terms_of_use "Jamendo API terms of use"
@@ -24,3 +24,17 @@ YouTube search remains metadata/external-link only; no YouTube video is embedded
 [4]: https://freetouse.com/api "Free To Use official public API"
 [5]: https://core.telegram.org/bots/webapps "Telegram Mini Apps initData validation and viewport documentation"
 [6]: https://core.telegram.org/bots/api "Telegram Bot API update delivery and message methods"
+
+
+## Current implementation decision — 2026-10-22
+
+Music search now uses Wikimedia Commons only. The backend searches file pages, first requests lightweight audio MIME/URL data, then requests filtered `extmetadata` for at most 20 candidate audio files. Results need an allowed HTTPS Commons file page and upload URL, a browser-compatible audio MIME type, creator/credit, and a known license URL. The app shows the creator, Commons file page, and per-file license link; it accepts Public Domain/Mark, CC0, CC BY and CC BY-SA labels while excluding NC/ND labels. The implementation does not make Commons a commercial-hit catalog or a warranty of copyright status: verify each file page and the intended use. Public Domain Mark 1.0 is a status mark, not CC0.
+
+Favorites and actual-start history stay local to the device. HTML audio and Media Session controls continue across app-section navigation, but Telegram WebView/OS lock-screen behavior is best-effort, not guaranteed. No provider secret or YouTube/Deezer integration is needed for Commons search.
+
+Official sources: [13] Wikimedia Commons API examples; [14] MediaWiki Search API; [15] Imageinfo and `extmetadata`; [16] Commons reuse guidance.
+
+[13]: https://commons.wikimedia.org/wiki/Commons:API/MediaWiki "Wikimedia Commons API examples"
+[14]: https://www.mediawiki.org/wiki/API:Search "MediaWiki API: Search"
+[15]: https://www.mediawiki.org/wiki/API:Imageinfo "MediaWiki API: Imageinfo"
+[16]: https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia "Wikimedia Commons reuse guidance"

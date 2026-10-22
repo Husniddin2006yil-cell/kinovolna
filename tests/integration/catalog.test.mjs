@@ -57,7 +57,7 @@ test('real PostgreSQL integration; Telegram network is explicitly a test double'
     assert.equal((await fetch(`${base}/api/health`)).status, 200);
     assert.equal((await fetch(`${base}/api/ready`)).status, 200);
     const configResponse = await (await fetch(`${base}/api/config`)).json();
-    assert.deepEqual(configResponse, { telegramConfigured: true, databaseConfigured: true, channelConfigured: true, audioRecognitionConfigured: false, tmdbConfigured: false, youtubeConfigured: false });
+    assert.deepEqual(configResponse, { telegramConfigured: true, databaseConfigured: true, channelConfigured: true, audioRecognitionConfigured: false, tmdbConfigured: false });
     assert.equal(JSON.stringify(configResponse).includes(testWebhookSecret), false);
   });
 

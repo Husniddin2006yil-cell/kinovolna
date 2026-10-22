@@ -45,3 +45,19 @@ Hozirgi katalogdagi film nomlari hozircha demo namunalari; ularga internetdan ta
 [10]: https://developer.themoviedb.org/reference/search-movie "TMDb Search Movies API"
 [11]: https://developer.themoviedb.org/docs/image-basics "TMDb Image Basics and sizes"
 [12]: https://developer.themoviedb.org/docs/faq "TMDb API FAQ and attribution"
+
+
+## Hozirgi tanlangan audio manbasi — Wikimedia Commons (2026-10-22)
+
+Musiqa qidiruvi server orqali Wikimedia Commons MediaWiki API’dan ishlaydi: fayllar `generator=search`, `gsrnamespace=6` va `filetype:audio` so‘rovi bilan topiladi. Avval URL/MIME kabi yengil maydonlar olinadi; ko‘pi bilan 20 mos audiofayl uchun `imageinfo` hamda kerakli `extmetadata` maydonlari (`Artist`, `ObjectName`, `LicenseShortName`, `LicenseUrl`, `Credit`) alohida olinadi. Rasmiy API hujjati `extmetadata` so‘rovi qimmat ekanini, shu sabab faqat kerakli fayllarda va imkon qadar kam ishlatilishini aytadi. Backend javobi besh daqiqa xotirada keshlanadi va endpoint har IP uchun daqiqasiga 30 so‘rov bilan cheklanadi. API kaliti frontendda yoki server sozlamalarida talab qilinmaydi.
+
+Qidiruv natijasiga faqat HTTPS’dagi Wikimedia fayl sahifasi va to‘g‘ridan-to‘g‘ri audio URL’i bor, brauzerda qo‘llab-quvvatlanadigan MP3/M4A/AAC/WAV MIME turi, muallif/credit hamda litsenziya metama’lumoti mavjud fayl qo‘shiladi. Hozir avtomatik filtrlash `Public Domain`/`Public Domain Mark`, CC0, CC BY va CC BY-SA’ni qabul qiladi; NC (notijorat) va ND (hosila ishlarni taqiqlash) variantlarini qabul qilmaydi. Har bir trek qatorida ijrochi, Commons fayl sahifasi va litsenziya havolasi ko‘rinadi. Dastlabki ikkita tarixiy namunada Public Domain Mark 1.0 ko‘rsatiladi; bu CC0 bilan bir xil litsenziya emas.
+
+**Chegara:** Wikimedia Commons mashhur tijorat katalogi yoki kafolatlangan zamonaviy qo‘shiqlar sayti emas. Fayl sahifasidagi huquqiy ma’lumotni loyiha egasi alohida tekshirishi kerak; Wikimedia o‘zi metadata to‘g‘riligiga kafolat bermasligini bildiradi. Shuning uchun qidiruv “hamma qo‘shiqlar bepul” degani emas. Litsenziyaga rioya qilish, mualliflik attribution’i va hududiy/non-copyright cheklovlari foydalanuvchining yakuniy foydalanish holatiga bog‘liq. iPhone/Telegram WebView’da ekran qulflanganda ijro Media Session orqali imkon qadar qo‘llab-quvvatlanadi, ammo qurilma va Telegram siyosati sabab kafolatlanmaydi; haqiqiy iPhone lock-screen sinovi bu sandbox sinovining o‘rnini bosa olmaydi.
+
+Rasmiy manbalar: [13] Wikimedia Commons MediaWiki API misollari; [14] MediaWiki Search API; [15] MediaWiki Imageinfo/`extmetadata`; [16] Wikimedia Commons tashqarida qayta foydalanish yo‘riqnomasi.
+
+[13]: https://commons.wikimedia.org/wiki/Commons:API/MediaWiki "Wikimedia Commons MediaWiki API examples"
+[14]: https://www.mediawiki.org/wiki/API:Search "MediaWiki API: Search"
+[15]: https://www.mediawiki.org/wiki/API:Imageinfo "MediaWiki API: Imageinfo"
+[16]: https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia "Wikimedia Commons reuse guidance"

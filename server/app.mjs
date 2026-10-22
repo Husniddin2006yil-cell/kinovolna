@@ -9,7 +9,7 @@ import { readConfig } from './config.mjs';
 import { createTelegramClient } from './telegram.mjs';
 import { getTelegramDiagnostics } from './telegram-diagnostics.mjs';
 import { fetchTmdbWatchProviders, matchTmdbPoster } from './tmdb.mjs';
-import { searchYoutubeMusic, YouTubeApiError } from './youtube.mjs';
+import { searchCommonsAudio } from './commons-audio.mjs';
 import { movieCopyOptions } from './movie-caption.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -300,7 +300,7 @@ function parseImportItem(item, configuredChannelId) {
   const seriesTitle = typeof item.seriesTitle === 'string' && item.seriesTitle.trim() ? item.seriesTitle.trim().slice(0, 500) : null;
   const seasonNumber = Number.isSafeInteger(item.seasonNumber) && item.seasonNumber >= 0 && item.seasonNumber <= 999 ? item.seasonNumber : null;
   const episodeNumber = Number.isSafeInteger(item.episodeNumber) && item.episodeNumber >= 1 && item.episodeNumber <= 100000 ? item.episodeNumber : null;
-  if ((seasonNumber !== null) !== (episodeNumber !== null)) throw new RequestError(400, 'invalid_import', 'Mavsum va qism raqami birga berilishi kerak.');
+  if ((seasonNumber !== null) !== (episodeNumber !== null)) throw new RequestError(400, 'invalid_import', 'Номер сезона и номер серии нужно указать вместе.');
   return { id: crypto.randomUUID(), title, description, channelId, messageId, year, genre, kind, poster, seriesTitle, seasonNumber, episodeNumber };
 }
 
@@ -308,7 +308,7 @@ function asyncRoute(handler) {
   return (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 }
 
-export function createApp({ config = readConfig(), pool = null, telegram = null } = {}) {
+export function createApp({ config = readConfig(), pool = null, telegram = null, musicSearch = searchCommonsAudio } = {}) {
   const app = express();
   const telegramClient = telegram || (config.telegramConfigured ? createTelegramClient(config.telegramBotToken) : null);
   const distDirectory = path.resolve(process.cwd(), 'dist');
@@ -549,9 +549,9 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
           const previous = index > 0 ? siblings.rows[index - 1] : null;
           const next = index >= 0 && index < siblings.rows.length - 1 ? siblings.rows[index + 1] : null;
           const row = [];
-          if (previous) row.push({ text: '⬅️ Oldingi qism', callback_data: `episode_${previous.id}` });
-          if (next) row.push({ text: '➡️ Keyingi qism', callback_data: `episode_${next.id}` });
-          if (siblings.rows.length > 1) options.reply_markup = { inline_keyboard: [...(row.length ? [row] : []), [{ text: '📋 Qismlar ro‘yxati', callback_data: `episode_list_${film.series_id}` }]] };
+          if (previous) row.push({ text: '⬅️ Предыдущая серия', callback_data: `episode_${previous.id}` });
+          if (next) row.push({ text: '➡️ Следующая серия', callback_data: `episode_${next.id}` });
+          if (siblings.rows.length > 1) options.reply_markup = { inline_keyboard: [...(row.length ? [row] : []), [{ text: '📋 Список серий', callback_data: `episode_list_${film.series_id}` }]] };
         }
         await telegramClient.copyMessage(chatId, film.channel_id, film.message_id, options);
         return;
@@ -653,11 +653,11 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     if (!client || !pool || !config.databaseConfigured || !config.channelConfigured || !await requireBotChatMember({ chat: callback.message.chat, from: callback.from })) return;
     if (listMatch) {
       const rows = await client.query(`SELECT f.id, f.title, f.season_number, f.episode_number FROM films f WHERE f.series_id = $1 ORDER BY f.season_number, f.episode_number`, [listMatch[1]]);
-      if (!rows.rows.length) return telegramClient.sendMessage(chatId, 'Qismlar ro‘yxati topilmadi.');
-      return telegramClient.sendMessage(chatId, '📋 Qismlar ro‘yxati:', { reply_markup: { inline_keyboard: rows.rows.slice(0, 50).map((row) => [{ text: `${row.season_number ? `S${row.season_number} ` : ''}${row.episode_number ? `E${row.episode_number} ` : ''}${String(row.title).slice(0, 45)}`, callback_data: `episode_${row.id}` }]) } });
+      if (!rows.rows.length) return telegramClient.sendMessage(chatId, 'Список серий не найден.');
+      return telegramClient.sendMessage(chatId, '📋 Список серий:', { reply_markup: { inline_keyboard: rows.rows.slice(0, 50).map((row) => [{ text: `${row.season_number ? `S${row.season_number} ` : ''}${row.episode_number ? `E${row.episode_number} ` : ''}${String(row.title).slice(0, 45)}`, callback_data: `episode_${row.id}` }]) } });
     }
     const result = await client.query(`SELECT id, title, channel_id, message_id, channel_username, video_file_id, series_id, season_number, episode_number FROM films WHERE id = $1 AND channel_id = $2::bigint AND message_id > 0`, [episodeMatch[1], config.telegramChannelId]);
-    if (!result.rows[0]) return telegramClient.sendMessage(chatId, 'Bu qism topilmadi yoki mavjud emas.');
+    if (!result.rows[0]) return telegramClient.sendMessage(chatId, 'Серия не найдена или недоступна.');
     await sendFilmToPrivateChat(client, chatId, result.rows[0]);
   }
 
@@ -823,7 +823,6 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     channelConfigured: config.channelConfigured,
     audioRecognitionConfigured: Boolean(config.audioRecognitionApiKey),
     tmdbConfigured: config.tmdbConfigured,
-    youtubeConfigured: Boolean(config.youtubeDataApiKey),
   }));
 
   app.get('/api/admin/telegram/diagnostics', asyncRoute(async (request, response) => {
@@ -946,56 +945,22 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
     response.json({ provider: 'TMDB / JustWatch', region, link, providers, attribution: 'Данные о доступности предоставлены JustWatch.' });
   }));
 
-  app.get('/api/music/catalog', asyncRoute(async (request, response) => {
-    const query = request.query.q === undefined ? '' : typeof request.query.q === 'string' && request.query.q.length <= 120 ? request.query.q.trim() : null;
-    if (query === null) throw new RequestError(400, 'invalid_search', 'Поисковый запрос музыки некорректен.');
-    const url = new URL(query ? 'https://api.deezer.com/search' : 'https://api.deezer.com/chart/0/tracks');
-    url.searchParams.set('limit', '30');
-    if (query) url.searchParams.set('q', query);
-    let providerResponse;
+  app.get('/api/music/search', rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (_request, response) => sendError(response, 429, 'music_rate_limited', 'Слишком много поисковых запросов. Подождите минуту и попробуйте снова.'),
+  }), asyncRoute(async (request, response) => {
+    const query = typeof request.query.q === 'string' && request.query.q.length <= 120
+      ? request.query.q.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
+      : null;
+    if (!query || query.length < 2) throw new RequestError(400, 'invalid_search', 'Введите минимум два символа для поиска аудио.');
     try {
-      providerResponse = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+      const items = await musicSearch(query, 20);
+      response.json({ provider: 'Wikimedia Commons', attribution: 'Открытые аудиозаписи Wikimedia Commons; лицензия и автор указаны для каждого файла.', items: Array.isArray(items) ? items : [] });
     } catch {
-      return sendError(response, 502, 'music_catalog_unavailable', 'Музыкальный каталог временно недоступен.');
-    }
-    const payload = await providerResponse.json().catch(() => null);
-    if (!providerResponse.ok || !payload || !Array.isArray(payload.data)) return sendError(response, 502, 'music_catalog_unavailable', 'Музыкальный каталог не вернул данные.');
-    const items = payload.data.filter((item) => typeof item.preview === 'string' && /^https:\/\//.test(item.preview) && typeof item.title === 'string' && typeof item.artist?.name === 'string').map((item, index) => ({
-      id: `deezer-${item.id}`,
-      title: item.title,
-      artist: item.artist.name,
-      album: item.album?.title || 'Deezer',
-      duration: `${Math.floor(Number(item.duration || 0) / 60)}:${String(Number(item.duration || 0) % 60).padStart(2, '0')}`,
-      coverStyle: ['cover-moon', 'cover-blue', 'cover-dusk', 'cover-green'][index % 4],
-      tone: 'Deezer preview',
-      moods: ['happy', 'road'],
-      audioUrl: item.preview,
-      sourceUrl: typeof item.link === 'string' ? item.link : 'https://www.deezer.com/',
-      source: 'deezer',
-    }));
-    response.json({ provider: 'Deezer', previewSeconds: 30, items });
-  }));
-
-  app.get('/api/music/youtube', asyncRoute(async (request, response) => {
-    if (!config.youtubeDataApiKey) return sendError(response, 503, 'youtube_not_configured', 'Для поиска музыки добавьте YOUTUBE_API_KEY в переменные окружения Render.');
-    const query = request.query.q === undefined
-      ? ''
-      : typeof request.query.q === 'string' && request.query.q.length <= 120 ? request.query.q.trim() : null;
-    if (query === null || !query) throw new RequestError(400, 'invalid_search', 'Введите название песни или исполнителя.');
-    try {
-      const items = await searchYoutubeMusic(query, config.youtubeDataApiKey, { region: 'UZ' });
-      response.json({ provider: 'YouTube', region: 'UZ', items });
-    } catch (error) {
-      if (error instanceof YouTubeApiError) {
-        const status = error.code === 'youtube_quota_exceeded' ? 429 : error.code === 'youtube_access_denied' ? 503 : 502;
-        const message = error.code === 'youtube_quota_exceeded'
-          ? 'Дневной лимит поиска YouTube исчерпан. Попробуйте завтра.'
-          : error.code === 'youtube_access_denied'
-            ? 'YouTube Data API отклонил запрос. Проверьте ключ и доступ API.'
-            : 'Поиск YouTube временно недоступен. Попробуйте ещё раз.';
-        return sendError(response, status, error.code, message);
-      }
-      return sendError(response, 502, 'youtube_search_unavailable', 'Поиск YouTube временно недоступен. Попробуйте ещё раз.');
+      sendError(response, 502, 'music_source_unavailable', 'Свободный аудиоархив временно недоступен. Попробуйте позже.');
     }
   }));
 
@@ -1230,10 +1195,10 @@ export function createApp({ config = readConfig(), pool = null, telegram = null 
           const storedFilm = stored.rows[0];
           if (storedFilm && subscribers.rows.length) {
             const botLink = config.telegramBotUsername ? `https://t.me/${config.telegramBotUsername}?start=film_${storedFilm.id}` : null;
-            const text = `🎬 Yangi kino qo‘shildi: ${storedFilm.title}`;
+            const text = `🎬 В канале опубликован новый фильм: ${storedFilm.title}`;
             for (const subscriber of subscribers.rows) {
               try {
-                await telegramClient.sendMessage(subscriber.chat_id, text, botLink ? { reply_markup: { inline_keyboard: [[{ text: 'Botdan olish', url: botLink }]] } } : {});
+                await telegramClient.sendMessage(subscriber.chat_id, text, botLink ? { reply_markup: { inline_keyboard: [[{ text: 'Получить в боте', url: botLink }]] } } : {});
               } catch {
                 // Telegram may reject users who blocked the bot; keep other notifications working.
               }

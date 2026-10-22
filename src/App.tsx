@@ -8,16 +8,14 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Disc3,
   Film,
   Headphones,
   Heart,
   Home,
   Info,
-  ListMusic,
-  Maximize2,
   Mic2,
   Music2,
+  Pause,
   Play,
   Plus,
   Search,
@@ -27,13 +25,10 @@ import {
   Sparkles,
   Star,
   UserRound,
-  Volume2,
   X,
-  SkipBack,
-  SkipForward,
 } from 'lucide-react';
 import { films as demoFilms, generatedArt, type Film as FilmItem, type Track } from './data';
-import { getTelegramWebApp, loadFilmDetail, loadMusicCatalog, loadNotificationPreference, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchTelegramFilms, searchYoutubeMusic, setNotificationPreference, type TelegramUser } from './telegram';
+import { getPublicConfig, getTelegramWebApp, loadFilmDetail, loadNotificationPreference, loadTelegramCatalog, openFilmInTelegram, recognizeMusicSample, requestFilmPlayback, requestTmdbWatchProviders, searchCommonsAudio, searchTelegramFilms, setNotificationPreference, type TelegramUser } from './telegram';
 import { MusicPlayer } from './components/MusicPlayer';
 import { useAppViewport } from './useAppViewport';
 import { openAudioTracks } from './open-audio';
@@ -51,11 +46,6 @@ const navItems: { id: Section; label: string; icon: typeof Home }[] = [
 ];
 
 const filters = ['Всё', 'Популярное', 'Новинки', 'Фантастика', 'Драма', 'Триллер', 'Приключения'];
-const playlists = [
-  { title: 'Огни города', subtitle: 'Ночной плейлист', className: 'playlist-city', tracks: 18 },
-  { title: 'Тихая волна', subtitle: 'Для спокойного дня', className: 'playlist-blue', tracks: 12 },
-  { title: 'Новый маршрут', subtitle: 'В дорогу', className: 'playlist-road', tracks: 15 },
-];
 const moodWaves = [
   { id: 'love', title: 'Для любви', subtitle: 'Нежность и чувства', symbol: '♡', className: 'mood-love' },
   { id: 'road', title: 'В дороге', subtitle: 'Музыка для пути', symbol: '↗', className: 'mood-road' },
@@ -172,11 +162,12 @@ function FilmCard({ film, onOpen, isFavorite, onFavorite }: {
   );
 }
 
-function TrackRow({ track, index, isFavorite, isActive, onFavorite, onSelect, onArtist }: {
+function TrackRow({ track, index, isFavorite, isActive, isPlaying, onFavorite, onSelect, onArtist }: {
   track: Track;
   index: number;
   isFavorite: boolean;
   isActive: boolean;
+  isPlaying: boolean;
   onFavorite: () => void;
   onSelect: () => void;
   onArtist: () => void;
@@ -188,13 +179,17 @@ function TrackRow({ track, index, isFavorite, isActive, onFavorite, onSelect, on
       <div className="track-info">
         <strong>{track.title}</strong>
         <span><button className="artist-inline" onClick={onArtist}>{track.artist}</button><i />{track.album}</span>
+        {track.source === 'commons' && <small className="track-attribution">
+          {track.sourceUrl && <a href={track.sourceUrl} target="_blank" rel="noopener noreferrer">Страница источника</a>}
+          {track.licenseName && track.licenseUrl && <> <i /> <a href={track.licenseUrl} target="_blank" rel="noopener noreferrer">{track.licenseName}</a></>}
+        </small>}
       </div>
-      <span className="track-tone">{track.tone}</span>
+      <span className="track-tone">{track.licenseName ?? track.tone}</span>
       <span className="track-duration">{track.duration}</span>
       <button className={`icon-button track-heart ${isFavorite ? 'is-favorite' : ''}`} onClick={onFavorite} aria-label={isFavorite ? 'Убрать трек из избранного' : 'Добавить трек в избранное'}>
         <Heart size={15} fill={isFavorite ? 'currentColor' : 'none'} />
       </button>
-      <button className="icon-button track-play" onClick={onSelect} aria-label={track.source === 'youtube' ? `Открыть YouTube: ${track.title}` : `${isActive ? 'Пауза' : 'Воспроизвести'}: ${track.title}`}><Play size={15} fill="currentColor" /></button>
+      <button className="icon-button track-play" onClick={onSelect} aria-label={`${isPlaying ? 'Пауза' : 'Воспроизвести'}: ${track.title}`}>{isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button>
     </div>
   );
 }
@@ -269,6 +264,7 @@ function App() {
   const [query, setQuery] = useState('');
   const viewportHeight = useAppViewport();
   const [playRequest, setPlayRequest] = useState(0);
+  const [pauseRequest, setPauseRequest] = useState(0);
   const [musicQuery, setMusicQuery] = useState('');
   const [films, setFilms] = useState<FilmItem[]>([]);
   const [catalogMode, setCatalogMode] = useState<'loading' | 'telegram' | 'tmdb' | 'demo' | 'blocked'>('loading');
@@ -283,18 +279,19 @@ function App() {
   const [selectedFilm, setSelectedFilm] = useState<FilmItem | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>(['echoes']);
-  const [musicFavorites, setMusicFavorites] = useState<string[]>(['bluehour']);
+  const [musicFavorites, setMusicFavorites] = useState<string[]>([]);
   const [musicTracks, setMusicTracks] = useState<Track[]>([]);
-  const [youtubeSearchResults, setYoutubeSearchResults] = useState<Track[] | null>(null);
-  const [youtubeSearchBusy, setYoutubeSearchBusy] = useState(false);
-  const [youtubeSearchError, setYoutubeSearchError] = useState<string | null>(null);
-  const [musicCatalogError, setMusicCatalogError] = useState<string | null>(null);
+  const [musicSearchResults, setMusicSearchResults] = useState<Track[] | null>(null);
+  const [musicSearchBusy, setMusicSearchBusy] = useState(false);
+  const [musicSearchError, setMusicSearchError] = useState<string | null>(null);
+  const [musicPlaying, setMusicPlaying] = useState(false);
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>(['neon', 'city']);
   const [recentTrackIds, setRecentTrackIds] = useState<string[]>([]);
   const [activeTrack, setActiveTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [recognitionBusy, setRecognitionBusy] = useState(false);
+  const [recognitionStatus, setRecognitionStatus] = useState<'checking' | 'available' | 'not-configured' | 'unknown'>('checking');
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const [isSplashLeaving, setIsSplashLeaving] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
@@ -332,30 +329,36 @@ function App() {
   }, [reloadCatalog]);
 
   useEffect(() => {
+    let active = true;
+    void getPublicConfig()
+      .then((config) => { if (active) setRecognitionStatus(config.audioRecognitionConfigured ? 'available' : 'not-configured'); })
+      .catch(() => { if (active) setRecognitionStatus('unknown'); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (!telegramUser) return;
     void loadNotificationPreference().then(setNotificationsEnabled).catch(() => setNotificationsEnabled(false));
   }, [telegramUser]);
 
   const toggleNotifications = async () => {
     if (notificationsBusy || !telegramUser) {
-      if (!telegramUser) openUnavailable('Telegram kerak', 'Bildirishnomalarni yoqish uchun Mini App’ni Telegram botidan oching.');
+      if (!telegramUser) openUnavailable('Откройте КИНОВОЛНУ в Telegram', 'Чтобы включить уведомления, откройте Mini App КИНОВОЛНА через Telegram-бота.');
       return;
     }
     setNotificationsBusy(true);
     try {
       const enabled = await setNotificationPreference(!notificationsEnabled);
       setNotificationsEnabled(enabled);
-      setNotice({ title: enabled ? 'Bildirishnomalar yoqildi' : 'Bildirishnomalar o‘chirildi', body: enabled ? 'Yangi kino kanalga tushsa, bot chatiga xabar yuboriladi. Buning uchun bot avval /start bilan ishga tushirilgan bo‘lishi kerak.' : 'Yangi kino haqida botdan xabar kelmaydi.', label: 'Telegram bot' });
+      setNotice({
+        title: enabled ? 'Уведомления включены' : 'Уведомления выключены',
+        body: enabled ? 'Когда в канале появится новая публикация, бот пришлёт сообщение в ваш чат. Чтобы получать уведомления, сначала запустите бота командой /start.' : 'Новые сообщения о фильмах от бота приходить не будут.',
+        label: 'Telegram-бот',
+      });
     } catch (error) {
-      openUnavailable('Bildirishnomani yoqib bo‘lmadi', error instanceof Error ? error.message : 'Telegram botini /start bilan ishga tushiring.');
+      openUnavailable('Не удалось включить уведомления', error instanceof Error ? error.message : 'Сначала запустите Telegram-бота командой /start.');
     } finally { setNotificationsBusy(false); }
   };
-
-  useEffect(() => {
-    let active = true;
-    void loadMusicCatalog().then((items) => { if (active) { setMusicTracks(items); setMusicCatalogError(null); } }).catch((error) => { if (active) setMusicCatalogError(error instanceof Error ? error.message : 'Музыкальный каталог недоступен.'); });
-    return () => { active = false; };
-  }, []);
 
   const showDemoCatalog = () => {
     setFilms(demoFilms);
@@ -384,10 +387,12 @@ function App() {
       const saved = window.localStorage.getItem('kinovolna:favorites');
       const savedHistory = window.localStorage.getItem('kinovolna:history');
       const savedMusicFavorites = window.localStorage.getItem('kinovolna:music-favorites');
+      const savedMusicLibrary = window.localStorage.getItem('kinovolna:music-library');
       const savedRecentTracks = window.localStorage.getItem('kinovolna:music-history');
       if (saved) setFavorites(JSON.parse(saved) as string[]);
       if (savedHistory) setHistory(JSON.parse(savedHistory) as string[]);
       if (savedMusicFavorites) setMusicFavorites(JSON.parse(savedMusicFavorites) as string[]);
+      if (savedMusicLibrary) setMusicTracks(JSON.parse(savedMusicLibrary) as Track[]);
       if (savedRecentTracks) setRecentTrackIds(JSON.parse(savedRecentTracks) as string[]);
     } catch {
       // Local storage is optional in Telegram's embedded browser.
@@ -405,6 +410,10 @@ function App() {
   useEffect(() => {
     try { window.localStorage.setItem('kinovolna:music-favorites', JSON.stringify(musicFavorites)); } catch { /* optional */ }
   }, [musicFavorites]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('kinovolna:music-library', JSON.stringify(musicTracks.slice(0, 150))); } catch { /* optional */ }
+  }, [musicTracks]);
 
   useEffect(() => {
     try { window.localStorage.setItem('kinovolna:music-history', JSON.stringify(recentTrackIds)); } catch { /* optional */ }
@@ -442,16 +451,12 @@ function App() {
   }, [films, filter, query]);
 
   const filteredTracks = useMemo(() => {
-    const normalized = musicQuery.trim().toLocaleLowerCase();
-    return musicTracks.filter((track) => {
-      const matchesQuery = !normalized || [track.title, track.artist, track.album, track.tone].some((value) => value.toLocaleLowerCase().includes(normalized));
-      const matchesMode = musicMode === 'all' || musicFavorites.includes(track.id);
-      const matchesMood = !selectedMusicMood || track.moods.includes(selectedMusicMood);
-      return matchesQuery && matchesMode && matchesMood;
-    });
-  }, [musicTracks, musicFavorites, musicMode, musicQuery, selectedMusicMood]);
+    const source = musicSearchResults ?? (musicMode === 'favorites' ? [...openAudioTracks, ...musicTracks] : openAudioTracks);
+    const unique = [...new Map(source.map((track) => [track.id, track] as const)).values()];
+    return unique.filter((track) => musicMode === 'all' || musicFavorites.includes(track.id));
+  }, [musicSearchResults, musicFavorites, musicMode]);
 
-  const musicQueue = useMemo(() => [...musicTracks, ...openAudioTracks].filter((track, index, list) => list.findIndex((item) => item.id === track.id) === index), [musicTracks]);
+  const musicQueue = useMemo(() => musicSearchResults ?? openAudioTracks, [musicSearchResults]);
 
   const goTo = (next: Section) => {
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
@@ -550,43 +555,71 @@ function App() {
     setFilter('Всё');
   };
 
-  const chooseTrack = (track: Track) => {
-    setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
-    if (track.source === 'youtube') {
-      const url = track.sourceUrl;
-      if (url) {
-        const webApp = getTelegramWebApp();
-        if (webApp?.openLink) webApp.openLink(url);
-        else window.open(url, '_blank', 'noopener,noreferrer');
+  const runMusicSearch = async (term: string) => {
+    const normalized = term.trim();
+    if (normalized.length < 2) {
+      setMusicSearchResults([]);
+      setMusicSearchError('Введите минимум два символа для поиска.');
+      return;
+    }
+    setMusicSearchBusy(true);
+    setMusicSearchError(null);
+    setMusicSearchResults([]);
+    try {
+      const results = await searchCommonsAudio(normalized);
+      setMusicSearchResults(results);
+      if (results.length) {
+        setMusicTracks((current) => {
+          const merged = new Map<string, Track>();
+          for (const item of [...results, ...current]) merged.set(item.id, item);
+          return [...merged.values()].slice(0, 150);
+        });
+      } else {
+        setMusicSearchError('В открытом архиве нет подходящих записей с проверенной свободной лицензией и совместимым аудиоформатом. Попробуйте другие слова.');
       }
-      openUnavailable('YouTube audio-only emas', 'YouTube qidiruvi faqat metadata va rasmiy tashqi ko‘rish havolasini beradi. YouTube videosi ilova ichida yashirilmaydi va undan audio ajratib olinmaydi. Audio uchun Deezer preview yoki Open archive treklaridan foydalaning.', 'YouTube · cheklov');
+    } catch (error) {
+      setMusicSearchError(error instanceof Error ? error.message : 'Свободный аудиоархив временно недоступен. Попробуйте позже.');
+    } finally {
+      setMusicSearchBusy(false);
+    }
+  };
+
+  const submitMusicSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSelectedArtist(null);
+    void runMusicSearch(musicQuery);
+  };
+
+  const chooseTrack = (track: Track) => {
+    if (!track.audioUrl) {
+      openUnavailable('Аудиофайл недоступен', 'У этой записи нет прямого аудиофайла, поэтому плеер не подменяет его видео или внешней ссылкой.', 'Нет аудиоисточника');
+      return;
+    }
+    if (activeTrack?.id === track.id && musicPlaying) {
+      setPauseRequest((current) => current + 1);
+      setPlayerOpen(true);
       return;
     }
     setActiveTrack(track);
-    if (track.audioUrl) { setPlayerOpen(false); setPlayRequest((current) => current + 1); }
-    else openUnavailable('Аудиоисточник пока не подключён', `${track.title} — ${track.artist}. Для настоящего воспроизведения нужен разрешённый аудиофайл или поток.`, 'Музыка · источник недоступен');
+    setPlayerOpen(false);
+    setPlayRequest((current) => current + 1);
   };
 
-  const submitYoutubeSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const term = musicQuery.trim();
-    if (!term) return;
-    setYoutubeSearchBusy(true);
-    setYoutubeSearchError(null);
-    setYoutubeSearchResults(null);
-    try {
-      const results = await searchYoutubeMusic(term);
-      setYoutubeSearchResults(results);
-      if (!results.length) setYoutubeSearchError('По этому запросу YouTube не нашёл подходящих встроенных видео. Попробуйте другое название или исполнителя.');
-    } catch (error) {
-      setYoutubeSearchError(error instanceof Error ? error.message : 'Поиск YouTube временно недоступен.');
-    } finally {
-      setYoutubeSearchBusy(false);
-    }
+  const recordTrackPlayed = (track: Track) => {
+    setRecentTrackIds((current) => [track.id, ...current.filter((id) => id !== track.id)].slice(0, 5));
+    setMusicTracks((current) => {
+      const merged = new Map<string, Track>([[track.id, track]]);
+      for (const item of current) if (!merged.has(item.id)) merged.set(item.id, item);
+      return [...merged.values()].slice(0, 150);
+    });
   };
 
   const handleMusicRecognition = async () => {
     if (recognitionBusy) return;
+    if (recognitionStatus !== 'available') {
+      openUnavailable('Распознавание не подключено', recognitionStatus === 'unknown' ? 'Не удалось проверить серверную настройку AudD. Сейчас доступен поиск свободных аудиозаписей в Wikimedia Commons.' : 'AudD пока не настроен на сервере. Сейчас доступен поиск свободных аудиозаписей в Wikimedia Commons.', 'Интеграция AudD');
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       openUnavailable('Микрофон недоступен', 'Этот браузер или Telegram WebView не поддерживает запись с микрофона.', 'Нужна поддержка микрофона');
       return;
@@ -647,13 +680,14 @@ function App() {
           index={index}
           isFavorite={musicFavorites.includes(track.id)}
           isActive={activeTrack?.id === track.id}
+          isPlaying={activeTrack?.id === track.id && musicPlaying}
           onFavorite={() => toggleMusicFavorite(track.id)}
           onSelect={() => chooseTrack(track)}
-          onArtist={() => { if (track.source === 'youtube') { setMusicQuery(track.artist); setYoutubeSearchResults(null); } else setSelectedArtist(track.artist); }}
+          onArtist={() => { setSelectedArtist(track.artist); setMusicMode('all'); setMusicQuery(track.artist); void runMusicSearch(track.artist); }}
         />
       ))}
     </div>
-  ) : <EmptyState query={musicQuery || undefined} onReset={() => { setMusicQuery(''); setMusicMode('all'); }} />;
+  ) : <EmptyState query={musicQuery || undefined} onReset={() => { setMusicQuery(''); setMusicMode('all'); setMusicSearchResults(null); setMusicSearchError(null); }} />;
 
   const renderHome = () => {
     const filmsOnly = films.filter((film) => film.kind === 'Фильм');
@@ -680,9 +714,9 @@ function App() {
         ) : catalogMode === 'tmdb' && films[0] ? (
           <section className="hero-card channel-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(7,10,18,.98) 0%, rgba(7,10,18,.76) 35%, rgba(7,10,18,.16) 100%), url("${films[0].poster}")` }}>
             <div className="hero-copy">
-              <Tag bright><Star size={13} fill="currentColor" /> Reytingi baland</Tag>
+              <Tag bright><Star size={13} fill="currentColor" /> Высокий рейтинг</Tag>
               <h1>{films[0].title}</h1>
-              <p>{films[0].description || 'TMDB’dan tanlangan yuqori reytingli film.'}</p>
+              <p>{films[0].description || 'Рекомендованный фильм с высоким рейтингом по данным TMDB.'}</p>
               <div className="hero-details"><span><Star size={14} fill="currentColor" /> {films[0].rating}</span><i />{films[0].year || '—'}<i />{films[0].genre}</div>
               <button className="button button-primary" onClick={() => openFilm(films[0])}>Подробнее <ArrowRight size={16} /></button>
             </div>
@@ -735,54 +769,72 @@ function App() {
   );
 
   const renderMusic = () => {
-    const recentlySelectedTracks = recentTrackIds.map((id) => musicTracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
+    const knownTracks = [...new Map([...openAudioTracks, ...musicTracks].map((track) => [track.id, track] as const)).values()];
+    const recentlyPlayedTracks = recentTrackIds.map((id) => knownTracks.find((track) => track.id === id)).filter((track): track is Track => Boolean(track));
+    const displayTracks = filteredTracks;
+
     if (selectedArtist) {
-      const artistTracks = musicTracks.filter((track) => track.artist === selectedArtist);
+      const artistTracks = (musicSearchResults ?? []).filter((track) => track.artist.toLocaleLowerCase().includes(selectedArtist.toLocaleLowerCase()));
       const isFollowed = followedArtists.includes(selectedArtist);
       return (
         <section className="page-section music-page artist-page">
           <button className="back-link" onClick={() => setSelectedArtist(null)}><ArrowLeft size={17} /> К музыке</button>
-          <div className="artist-profile-hero"><div className="artist-avatar artist-avatar-large"><AudioLines size={31} /></div><div className="artist-profile-copy"><div className="eyebrow">СТРАНИЦА ИСПОЛНИТЕЛЯ · КАТАЛОГ-ПРИМЕР</div><h1>{selectedArtist}</h1><p>Независимый исполнитель · инди и электронное звучание</p><button className="button button-primary" onClick={() => setFollowedArtists((current) => isFollowed ? current.filter((name) => name !== selectedArtist) : [...current, selectedArtist])}><Plus size={16} /> {isFollowed ? 'Вы подписаны' : 'Подписаться'}</button></div></div>
-          <div className="music-toolbar"><div><div className="eyebrow">Подборка исполнителя</div><h2>Популярные треки</h2></div><Tag>Источник аудио не подключён</Tag></div>
+          <div className="artist-profile-hero"><div className="artist-avatar artist-avatar-large"><AudioLines size={31} /></div><div className="artist-profile-copy"><div className="eyebrow">ИСПОЛНИТЕЛЬ · WIKIMEDIA COMMONS</div><h1>{selectedArtist}</h1><p>Открытые аудиофайлы с указанными авторством и лицензией.</p><button className="button button-primary" onClick={() => setFollowedArtists((current) => isFollowed ? current.filter((name) => name !== selectedArtist) : [...current, selectedArtist])}><Plus size={16} /> {isFollowed ? 'Вы подписаны' : 'Подписаться'}</button></div></div>
+          <div className="music-toolbar"><div><div className="eyebrow">Результаты открытого архива</div><h2>Записи исполнителя</h2></div><Tag>Лицензия указана в каждой строке</Tag></div>
+          {musicSearchBusy && <p className="music-provider-note" role="status">Ищем записи этого исполнителя в Wikimedia Commons…</p>}
+          {musicSearchError && <div className="music-search-error" role="alert">{musicSearchError}</div>}
           {renderTrackList(artistTracks)}
-          <div className="integration-note"><Info size={16} /> Страница исполнителя и треки показаны на тестовых данных. Загрузка и воспроизведение аудио появятся после подключения разрешённого музыкального источника.</div>
         </section>
       );
     }
 
+    const moodQueries: Record<string, string> = {
+      love: 'love song', road: 'road music', workout: 'energetic music', work: 'ambient instrumental', happy: 'happy music', sad: 'melancholy music',
+    };
+
     return (
       <section className="page-section music-page">
-        <div className="music-welcome"><div className="music-welcome-copy"><div className="eyebrow"><span className="overline-dot" /> ПРОСТРАНСТВО ЗВУКА</div><h1>Найдите<br /><em>свой ритм.</em></h1><p>Выбирайте ритм, открывайте новых исполнителей и собирайте свою музыку.</p><button className="button button-primary" onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}><Mic2 size={17} /> {recognitionBusy ? 'Слушаем фрагмент…' : 'Распознать музыку'} <span className="button-live-dot" /></button></div><div className="music-visual"><div className="vinyl vinyl-back" /><div className="vinyl vinyl-front"><div className="vinyl-center"><AudioLines size={21} /></div></div><div className="music-visual-label"><Disc3 size={14} /> AUDD · МИКРОФОН</div></div></div>
+        <div className="music-page-heading">
+          <div><div className="eyebrow"><span className="overline-dot" /> WIKIMEDIA COMMONS · ОТКРЫТЫЕ ЛИЦЕНЗИИ</div><h1>Свободная<br /><em>музыка.</em></h1><p>Ищите аудиозаписи, которые можно прослушивать по указанной лицензии. Это открытый архив, а не каталог популярных коммерческих хитов.</p></div>
+          <button className="button button-glass recognition-trigger" onClick={() => void handleMusicRecognition()} disabled={recognitionBusy || recognitionStatus !== 'available'}><Mic2 size={16} /> {recognitionBusy ? 'Слушаем фрагмент…' : recognitionStatus === 'available' ? 'Распознать песню' : recognitionStatus === 'checking' ? 'Проверяем сервис…' : recognitionStatus === 'not-configured' ? 'Распознавание не подключено' : 'Сервис недоступен'}</button>
+        </div>
 
-        <div className="music-toolbar"><div><div className="eyebrow">Выберите настроение</div><h2>Музыкальные волны</h2></div><Tag>Подборки-примеры</Tag></div>
+        <form className="large-search music-search" onSubmit={submitMusicSearch}>
+          <Search size={18} />
+          <input value={musicQuery} onChange={(event) => { setMusicQuery(event.target.value); setSelectedArtist(null); setMusicSearchResults(null); setMusicSearchError(null); }} placeholder="Название записи или исполнителя…" aria-label="Поиск свободной музыки" />
+          <button type="submit" className="music-search-button" disabled={musicSearchBusy || musicQuery.trim().length < 2}>{musicSearchBusy ? 'Ищем…' : 'Найти'}</button>
+        </form>
+        <p className="music-provider-note">В выдачу попадают только прямые аудиофайлы в поддерживаемом браузером формате, с распознанным свободным статусом и ссылкой на автора и условия использования.</p>
+
+        <div className="music-toolbar"><div><div className="eyebrow">Подбор по ключевым словам</div><h2>Музыкальные волны</h2></div><Tag>Поиск в открытом архиве</Tag></div>
         <div className="mood-grid">
           {moodWaves.map((mood, index) => (
-            <button key={mood.id} className={`mood-card ${mood.className} ${selectedMusicMood === mood.id ? 'mood-card-active' : ''}`} aria-pressed={selectedMusicMood === mood.id} onClick={() => { setSelectedMusicMood((current) => current === mood.id ? null : mood.id); setMusicMode('all'); }}>
+            <button key={mood.id} className={`mood-card ${mood.className} ${selectedMusicMood === mood.id ? 'mood-card-active' : ''}`} aria-pressed={selectedMusicMood === mood.id} onClick={() => {
+              const selected = selectedMusicMood === mood.id;
+              setSelectedMusicMood(selected ? null : mood.id);
+              setMusicMode('all');
+              setSelectedArtist(null);
+              const term = selected ? '' : moodQueries[mood.id];
+              setMusicQuery(term);
+              if (selected) { setMusicSearchResults(null); setMusicSearchError(null); }
+              else void runMusicSearch(term);
+            }}>
               <span className="mood-symbol">{mood.symbol}</span><span className="mood-name">{mood.title}</span><span className="mood-sub">{mood.subtitle}</span><span className="mood-arrow">{String(index + 1).padStart(2, '0')}</span>
             </button>
           ))}
         </div>
+        <p className="music-provider-note">Настроение задаёт поисковые слова; это не автоматическая музыкальная классификация и не персональная рекомендация.</p>
 
-        <div className="music-toolbar"><div><div className="eyebrow">Подборки для разного настроения</div><h2>Плейлисты</h2></div><button className="text-action" onClick={() => openUnavailable('Плейлисты-примеры', 'Эти карточки показывают будущую библиотеку. Реальное сохранение пользовательских плейлистов будет добавлено вместе с backend.')}>Все подборки <ArrowRight size={15} /></button></div>
-        <div className="playlist-grid">{playlists.map((playlist) => <button key={playlist.title} className={`playlist-card ${playlist.className}`} onClick={() => openUnavailable(playlist.title, 'Это пример плейлиста. Для реального прослушивания нужны разрешённые аудиофайлы или потоковый источник.', 'Источник музыки не подключён')}><span className="playlist-disc"><AudioLines size={20} /></span><span className="playlist-title">{playlist.title}</span><span className="playlist-subtitle">{playlist.subtitle} · {playlist.tracks} треков</span><span className="playlist-arrow"><Play size={14} fill="currentColor" /></span></button>)}</div>
+        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Wikimedia Commons · свободные записи</div><h2>{musicSearchResults === null ? 'Аудиоархив' : 'Результаты поиска'}</h2></div><div className="music-list-filters"><button className={`filter-chip ${musicMode === 'all' ? 'active' : ''}`} onClick={() => setMusicMode('all')}>Все</button><button className={`filter-chip ${musicMode === 'favorites' ? 'active' : ''}`} onClick={() => setMusicMode('favorites')}>Избранное</button></div></div>
+        <div className="music-list-toolbar"><span>{musicSearchResults === null ? 'Проверенные записи' : `Запрос: «${musicQuery}»`}</span><span>{musicSearchBusy ? 'Ищем…' : `${displayTracks.length} записей`}</span></div>
+        {musicSearchBusy && <p className="music-provider-note" role="status">Ищем открытые аудиофайлы…</p>}
+        {musicSearchError && <div className="music-search-error" role="alert">{musicSearchError}</div>}
+        {renderTrackList(displayTracks)}
 
-        <div className="music-toolbar artist-toolbar"><div><div className="eyebrow">Откройте новые имена</div><h2>Исполнители</h2></div><Tag>Deezer previews</Tag></div>
-        <div className="artist-grid">{[...new Set(musicTracks.map((track) => track.artist))].map((artist, index) => <button key={artist} className="artist-card" onClick={() => setSelectedArtist(artist)}><span className={`artist-avatar artist-avatar-${index + 1}`}><AudioLines size={20} /></span><strong>{artist}</strong><span>Deezer</span></button>)}</div>
-
-        <div className="music-toolbar"><div><div className="eyebrow">Wikimedia Commons · Public Domain</div><h2>Свободный аудиоархив</h2></div><Tag>Полные записи</Tag></div>
-        <p className="youtube-search-note">Две исторические записи, отмеченные источником как общественное достояние. Это не каталог современных хитов. Аудио продолжает играть при переходе между разделами; сведения о записи доступны по ссылке «Источник» в плеере.</p>
-        {renderTrackList(openAudioTracks)}
-
-        <div className="music-toolbar tracks-heading"><div><div className="eyebrow">Песня или исполнитель</div><h2>Поиск на YouTube</h2></div><Tag>Официальный YouTube-плеер</Tag></div>
-        <form className="large-search music-search" onSubmit={(event) => void submitYoutubeSearch(event)}><Search size={18} /><input value={musicQuery} onChange={(event) => { setMusicQuery(event.target.value); setYoutubeSearchResults(null); setYoutubeSearchError(null); }} placeholder="Название песни или исполнитель..." aria-label="Поиск песни или исполнителя на YouTube" /><button type="submit" className="youtube-search-button" disabled={youtubeSearchBusy || !musicQuery.trim()}>{youtubeSearchBusy ? 'Ищем…' : 'Искать'}</button></form>
-        <p className="youtube-search-note">YouTube остаётся видимым при переходе между разделами: скрытое воспроизведение и извлечение аудио не поддерживаются. При сворачивании приложения или нехватке места из-за клавиатуры видео ставится на паузу. Правообладатель может ограничить отдельные ролики.</p>
-        {youtubeSearchError && <div className="youtube-search-error" role="alert">{youtubeSearchError}</div>}
-        <div className="music-list-toolbar"><div><span>{youtubeSearchResults ? 'Результаты YouTube' : 'Популярные треки Deezer'}</span></div><span>{youtubeSearchBusy ? 'Загрузка…' : (youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks)).length} треков</span></div>
-        {renderTrackList(youtubeSearchResults ?? (musicQuery.trim() ? [] : filteredTracks))}
-        <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>Запишем до 8 секунд с микрофона и отправим фрагмент в AudD. Результат появляется только при реальном совпадении.</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy}>{recognitionBusy ? 'Слушаем…' : 'Распознать'} <ChevronRight size={14} /></button></div>
-        <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">Ваша история</div><h2>Недавно слушали</h2></div><Tag>Демо · последние выборы</Tag></div>
-        {recentlySelectedTracks.length ? renderTrackList(recentlySelectedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Выбранные треки появятся здесь. В прототипе это демо-история, а не подтверждённое воспроизведение.</span></div>}
-        <p className="recent-music-note">{musicCatalogError ?? 'Треки Deezer доступны как 30-секундные preview. Поиск YouTube показывает только официальный встроенный плеер; загрузки аудио нет.'}</p>
+        <div className="recognition-note"><div className="recognition-icon"><Mic2 size={17} /></div><div><strong>Узнайте, что играет</strong><span>{recognitionStatus === 'available' ? 'Распознавание отправляет короткую запись на настроенный серверный сервис. Оно не означает, что найденную песню можно бесплатно воспроизводить.' : recognitionStatus === 'checking' ? 'Проверяем, подключён ли серверный сервис распознавания.' : recognitionStatus === 'not-configured' ? 'Сервис AudD не подключён. Микрофон не запрашивается; можно искать свободные записи в открытом архиве.' : 'Не удалось проверить серверный сервис. Распознавание пока недоступно; поиск аудиозаписей работает отдельно.'}</span></div><button onClick={() => void handleMusicRecognition()} disabled={recognitionBusy || recognitionStatus !== 'available'}>{recognitionBusy ? 'Слушаем…' : recognitionStatus === 'available' ? 'Распознать' : 'Недоступно'} <ChevronRight size={14} /></button></div>
+        <div className="music-toolbar recent-music-toolbar"><div><div className="eyebrow">История устройства</div><h2>Недавно слушали</h2></div><Tag>Только после начала воспроизведения</Tag></div>
+        {recentlyPlayedTracks.length ? renderTrackList(recentlyPlayedTracks) : <div className="recent-music-empty"><Headphones size={19} /><span>Здесь появится запись только после фактического запуска аудио.</span></div>}
+        <p className="recent-music-note">Избранное и история хранятся локально на этом устройстве. Общий профиль и статистика прослушиваний потребуют backend-базу.</p>
       </section>
     );
   };
@@ -790,7 +842,7 @@ function App() {
   const renderProfile = () => {
     const savedFilms = films.filter((film) => favorites.includes(film.id));
     const recentFilms = history.map((id) => films.find((film) => film.id === id)).filter((film): film is FilmItem => Boolean(film));
-    const savedTracks = musicTracks.filter((track) => musicFavorites.includes(track.id));
+    const savedTracks = [...new Map([...openAudioTracks, ...musicTracks].map((track) => [track.id, track] as const)).values()].filter((track) => musicFavorites.includes(track.id));
     return (
       <section className="page-section profile-page">
         <div className="page-title-row"><div><div className="eyebrow">Личный раздел</div><h1>Ваш профиль</h1><p>Сохранённое и открытые карточки. Избранное хранится на этом устройстве.</p></div><button className="icon-button settings-button" onClick={() => openUnavailable('Профиль и настройки', 'Вход подтверждается сервером через Telegram initData. Избранное пока сохраняется локально, а не в аккаунте. Пароль Telegram не требуется.', 'Информация')} aria-label="Настройки"><Settings2 size={19} /></button></div>
@@ -820,7 +872,36 @@ function App() {
           <div className="rights-note"><Info size={14} /> Используются только источники, которые разрешено распространять.</div>
         </div>
       </div>
-      {film.kind === 'Сериал' && <section className="episodes-section"><div className="episode-heading"><div><div className="eyebrow">Mavsumlar va qismlar</div><h2>Qismlar</h2></div><Tag>{film.episodes?.length ?? 0} ta mavjud</Tag></div><div className="episode-list">{film.episodes?.map((episode, index) => { const item = typeof episode === 'string' ? { id: film.id, title: episode, season: 1, number: index + 1, available: false } : episode; return <button key={`${item.id}-${item.number}`} className="episode-row" onClick={() => item.available ? void handleTelegramAction({ ...film, id: item.id, title: item.title }) : openUnavailable('Video topilmadi', 'Bu qism uchun Telegram xabari yoki video mavjud emas.')}><span className="episode-number">S{item.season} · E{String(item.number).padStart(2, '0')}</span><span className="episode-play"><Play size={14} fill="currentColor" /></span><strong>{item.title}</strong><span className="episode-runtime">{item.available ? 'Mavjud' : 'Topilmadi'}</span><ChevronRight size={16} /></button>; })}</div></section>}
+      {film.kind === 'Сериал' && (
+        <section className="episodes-section">
+          <div className="episode-heading">
+            <div><div className="eyebrow">Сезоны и серии</div><h2>Серии</h2></div>
+            <Tag>Доступно серий: {film.episodes?.length ?? 0}</Tag>
+          </div>
+          <div className="episode-list">
+            {film.episodes?.map((episode, index) => {
+              const item = typeof episode === 'string'
+                ? { id: film.id, title: episode, season: 1, number: index + 1, available: false }
+                : episode;
+              return (
+                <button
+                  key={`${item.id}-${item.number}`}
+                  className="episode-row"
+                  onClick={() => item.available
+                    ? void handleTelegramAction({ ...film, id: item.id, title: item.title })
+                    : openUnavailable('Серия не найдена', 'Для этой серии нет связанного сообщения в Telegram или видеопотока.')}
+                >
+                  <span className="episode-number">S{item.season} · E{String(item.number).padStart(2, '0')}</span>
+                  <span className="episode-play"><Play size={14} fill="currentColor" /></span>
+                  <strong>{item.title}</strong>
+                  <span className="episode-runtime">{item.available ? 'Доступна' : 'Не найдена'}</span>
+                  <ChevronRight size={16} />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <div className="detail-legal"><ShieldCheck size={16} /><span>{film.source === 'telegram' ? 'Карточка связана с публикацией канала. Защищённый просмотр доступен только для подходящих видеофайлов; большие файлы можно запросить через бота.' : film.source === 'tmdb' ? 'TMDB предоставляет метаданные. Доступность легальных сервисов проверяется через JustWatch; само видео открывается на выбранной площадке, если оно доступно в регионе UZ.' : 'Сейчас показан демонстрационный каталог без соответствующего поста в канале и без видеопотока.'}</span></div>
     </section>
   );
@@ -849,7 +930,7 @@ function App() {
         {content}
         <footer className="site-footer"><div><Logo /><span>Единое пространство фильмов и музыки.</span></div><span>© 2026 КИНОВОЛНА <i /> {catalogMode === 'telegram' ? 'Каталог Telegram · онлайн-видео не подключено' : catalogMode === 'tmdb' ? 'Метаданные TMDB · легальный видеопровайдер не подключён' : 'Для реального каталога нужна настройка источника'}</span></footer>
       </main>
-      <MusicPlayer track={activeTrack} queue={musicQueue} playRequest={playRequest} open={playerOpen} onOpen={setPlayerOpen} onTrackChange={chooseTrack} />
+      <MusicPlayer track={activeTrack} queue={musicQueue} playRequest={playRequest} pauseRequest={pauseRequest} open={playerOpen} onOpen={setPlayerOpen} onTrackChange={chooseTrack} onPlaybackChange={setMusicPlaying} onTrackPlayed={recordTrackPlayed} />
       <nav className="mobile-nav" aria-label="Мобильная навигация">
         {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`mobile-nav-item ${section === id && !selectedFilm ? 'mobile-nav-active' : ''}`} onClick={() => goTo(id)}><span className="mobile-icon-wrap"><Icon size={19} strokeWidth={section === id ? 2.3 : 1.8} /></span><span>{label}</span></button>)}
       </nav>

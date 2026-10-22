@@ -37,8 +37,9 @@ export type Track = {
   moods: string[];
   audioUrl?: string;
   sourceUrl?: string;
-  source?: 'deezer' | 'youtube' | 'commons' | 'demo';
-  youtubeVideoId?: string;
+  source?: 'commons' | 'demo';
+  licenseName?: string;
+  licenseUrl?: string;
   thumbnailUrl?: string | null;
 };
 

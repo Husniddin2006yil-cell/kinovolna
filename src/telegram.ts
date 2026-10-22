@@ -37,6 +37,16 @@ export function getTelegramWebApp() {
   return typeof window === 'undefined' ? undefined : window.Telegram?.WebApp;
 }
 
+export type PublicApiConfig = { audioRecognitionConfigured: boolean };
+
+export async function getPublicConfig(): Promise<PublicApiConfig> {
+  const payload = await apiRequest<{ audioRecognitionConfigured?: unknown }>('/api/config');
+  if (typeof payload.audioRecognitionConfigured !== 'boolean') {
+    throw new CatalogApiError(502, 'invalid_public_config', 'Не удалось проверить настройки аудиосервиса.');
+  }
+  return { audioRecognitionConfigured: payload.audioRecognitionConfigured };
+}
+
 export class CatalogApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);
@@ -77,11 +87,8 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
       channel_access_denied: 'Для доступа нужно вступить в закрытый канал.',
       telegram_unavailable: 'Telegram временно недоступен. Повторите позже.',
       video_source_not_configured: 'Реальный разрешённый источник онлайн-видео не подключён.',
-      youtube_not_configured: 'Для поиска музыки добавьте YOUTUBE_API_KEY в переменные окружения Render.',
-      youtube_quota_exceeded: 'Дневной лимит поиска YouTube исчерпан. Попробуйте завтра.',
-      youtube_access_denied: 'YouTube Data API отклонил запрос. Проверьте ключ и включение API в Google Cloud.',
-      youtube_search_failed: 'Не удалось выполнить поиск YouTube. Попробуйте ещё раз.',
-      youtube_search_unavailable: 'Поиск YouTube временно недоступен. Попробуйте ещё раз.',
+      music_source_unavailable: 'Свободный аудиоархив временно недоступен. Попробуйте позже.',
+      music_rate_limited: 'Слишком много запросов. Подождите минуту и попробуйте снова.',
       video_too_large: 'Этот файл больше 20 МБ — Telegram Bot API не позволяет безопасно воспроизводить его в веб-плеере. Используйте «Отправить в бот».',
       telegram_file_unavailable: 'Telegram временно не отдаёт этот видеофайл. Используйте «Отправить в бот».',
       film_not_found: 'Публикация фильма не найдена в серверном каталоге.',
@@ -266,29 +273,22 @@ export async function recognizeMusicSample(sample: Blob): Promise<MusicRecogniti
   return payload;
 }
 
-export async function loadMusicCatalog(query = ''): Promise<Track[]> {
-  const path = query.trim() ? `/api/music/catalog?q=${encodeURIComponent(query.trim())}` : '/api/music/catalog';
-  const payload = await apiRequest<{ items: Track[] }>(path);
-  return Array.isArray(payload.items) ? payload.items : [];
-}
-
-export async function searchYoutubeMusic(query: string): Promise<Track[]> {
+export async function searchCommonsAudio(query: string): Promise<Track[]> {
   const normalized = query.trim();
   if (!normalized || normalized.length > 120) return [];
-  const payload = await apiRequest<{ items: Array<{ id: string; videoId: string; title: string; artist: string; album: string; duration: string; thumbnailUrl: string | null; videoUrl: string }> }>(`/api/music/youtube?q=${encodeURIComponent(normalized)}`);
-  if (!Array.isArray(payload.items)) throw new CatalogApiError(502, 'invalid_youtube_response', 'YouTube вернул список неверного формата.');
-  return payload.items.filter((item) => /^[A-Za-z0-9_-]{11}$/.test(item.videoId) && typeof item.title === 'string' && typeof item.artist === 'string').map((item, index) => ({
-    id: item.id,
-    title: item.title,
-    artist: item.artist,
-    album: 'YouTube',
-    duration: 'YouTube',
-    coverStyle: ['cover-moon', 'cover-blue', 'cover-dusk', 'cover-green'][index % 4],
-    tone: 'YouTube',
-    moods: [],
-    source: 'youtube' as const,
-    sourceUrl: item.videoUrl,
-    youtubeVideoId: item.videoId,
-    thumbnailUrl: item.thumbnailUrl,
-  }));
+  const payload = await apiRequest<{ items: Track[] }>(`/api/music/search?q=${encodeURIComponent(normalized)}`);
+  if (!Array.isArray(payload.items)) throw new CatalogApiError(502, 'invalid_music_response', 'Аудиоархив вернул список неверного формата.');
+  return payload.items.filter((item) => {
+    try {
+      const audio = new URL(item.audioUrl ?? '');
+      const source = new URL(item.sourceUrl ?? '');
+      const license = new URL(item.licenseUrl ?? '');
+      return item.source === 'commons' && Boolean(item.title && item.artist && item.licenseName)
+        && audio.protocol === 'https:' && audio.hostname === 'upload.wikimedia.org'
+        && source.protocol === 'https:' && source.hostname === 'commons.wikimedia.org'
+        && license.protocol === 'https:' && ['creativecommons.org', 'www.creativecommons.org', 'gnu.org', 'www.gnu.org', 'commons.wikimedia.org'].includes(license.hostname);
+    } catch {
+      return false;
+    }
+  });
 }
